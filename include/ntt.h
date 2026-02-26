@@ -61,7 +61,7 @@ public:
     constexpr static size_t v = ComputeThreeAdicity(N);
     constexpr static size_t V = ComputeThreePower(N);
 
-    static_assert(N == U * V, "CT23 requires O - 1 to factor as 2^u * 3^v");
+    static_assert(N == U * V, "MixedRadix23 NTT requires O - 1 to factor as 2^u * 3^v");
 
     constexpr static uint64_t ComputeOmegaO() {
         return Z::Pow(g, (p - 1) / O);
@@ -135,13 +135,13 @@ public:
             scratch[i] = a[gi[i] - 1];
         }
 
-        ForwardCT23NTT(scratch, a);
+        ForwardMixedRadix23NTT(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = Z::MulFastConst(a[i], omega_O_table[i], omega_O_barrett_table[i]);
         }
 
-        InverseCT23NTT(a, scratch);
+        InverseMixedRadix23NTT(a, scratch);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = scratch[(N - gi_inv[i + 1]) % N];
@@ -158,13 +158,13 @@ public:
             scratch[i] = a[gi[(N - i) % N] - 1];
         }
 
-        ForwardCT23NTT(scratch, a);
+        ForwardMixedRadix23NTT(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = Z::MulFastConst(a[i], omega_O_inv_table[i], omega_O_inv_barrett_table[i]);
         }
 
-        InverseCT23NTT(a, scratch);
+        InverseMixedRadix23NTT(a, scratch);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = scratch[gi_inv[i + 1]];
@@ -178,7 +178,7 @@ public:
 
 private:
     // scalar kernel
-    void CT23NTTScalar(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTScalar(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         for (size_t i = 0; i < N; i++) {
             b[i] = a[bit_reverse_table[i]];
         }
@@ -237,7 +237,7 @@ private:
 
 #if defined(__AVX2__)
     // AVX2 kernel
-    void CT23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         for (size_t i = 0; i < N; i++) {
             b[i] = a[bit_reverse_table[i]];
         }
@@ -366,20 +366,20 @@ private:
     }
 #endif
 
-    void CT23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
 #if defined(__AVX2__)
-        CT23NTTAVX2(a, b, omega, omega_barrett);
+        MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
 #else
-        CT23NTTScalar(a, b, omega, omega_barrett);
+        MixedRadix23NTTScalar(a, b, omega, omega_barrett);
 #endif
     }
 
-    void ForwardCT23NTT(uint64_t a[], uint64_t b[]) {
-        CT23NTT(a, b, omega_N_table, omega_N_barrett_table);
+    void ForwardMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
+        MixedRadix23NTT(a, b, omega_N_table, omega_N_barrett_table);
     }
 
-    void InverseCT23NTT(uint64_t a[], uint64_t b[]) {
-        CT23NTT(a, b, omega_N_inv_table, omega_N_inv_barrett_table);
+    void InverseMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
+        MixedRadix23NTT(a, b, omega_N_inv_table, omega_N_inv_barrett_table);
     }
 
     void ComputeOmegaNTable() {
@@ -403,7 +403,7 @@ private:
             omega_O_barrett_table[(N - gi_inv[i]) % N] = t;
             t = Z::Mul(t, omega_O);
         }
-        ForwardCT23NTT(omega_O_barrett_table, omega_O_table);
+        ForwardMixedRadix23NTT(omega_O_barrett_table, omega_O_table);
 
         uint64_t N_inv = Z::Pow(N, p - 2);
         for (size_t i = 0; i < N; i++) {
