@@ -1,18 +1,28 @@
 # tests/CMakeLists.txt
 
-# Download and include GoogleTest using FetchContent
-include(FetchContent)
+# Prefer a system-installed GoogleTest package and fall back to FetchContent.
+find_package(GTest CONFIG QUIET)
 
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.15.2 # Specify the desired version
-)
+if(NOT GTest_FOUND)
+    include(FetchContent)
 
-# Fetch the content
-FetchContent_MakeAvailable(googletest)
+    FetchContent_Declare(
+        googletest
+        URL      https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
 
-# Now, we can use the gtest and gtest_main targets
+    # Keep GoogleTest's options from leaking into parent projects.
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+
+    FetchContent_MakeAvailable(googletest)
+endif()
+
+if(TARGET GTest::gtest_main)
+    set(BDF17_GTEST_MAIN_TARGET GTest::gtest_main)
+else()
+    set(BDF17_GTEST_MAIN_TARGET gtest_main)
+endif()
 
 # Collect all test source files
 file(GLOB TEST_SOURCES "*.cpp")
@@ -20,15 +30,12 @@ file(GLOB TEST_SOURCES "*.cpp")
 # Add the test executable
 add_executable("${PROJECT_NAME}_tests" ${TEST_SOURCES})
 
-# Link the test executable against gtest and gtest_main
+# Link the test executable against bdf17_core and gtest_main
 target_link_libraries("${PROJECT_NAME}_tests"
-    gtest_main
-    # If your project executable is needed for testing, link it here
-    ${PROJECT_NAME}
+    PRIVATE
+    bdf17_core
+    ${BDF17_GTEST_MAIN_TARGET}
 )
-
-# Include directories if needed
-target_include_directories("${PROJECT_NAME}_tests" PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 # Add test cases to CTest
 include(GoogleTest)
