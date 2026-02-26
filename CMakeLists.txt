@@ -3,7 +3,7 @@ project(bdf17 VERSION 1.0.0 LANGUAGES CXX)
 
 # Set the C++ standard
 set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_QUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Optionally set build type if not specified
 if(NOT CMAKE_BUILD_TYPE)
@@ -14,19 +14,33 @@ endif()
 option(ENABLE_BENCHMARKS "Enable benchmarking with Google Benchmark" ON)
 
 # Add source files
-# Assuming your source files are in the 'src' directory
-file(GLOB_RECURSE SOURCES "src/*.cpp")
+file(GLOB_RECURSE PROJECT_SOURCES "src/*.cpp")
+set(ENTRYPOINT_SOURCE "${PROJECT_SOURCE_DIR}/src/bdf17.cpp")
+set(CORE_SOURCES ${PROJECT_SOURCES})
+list(REMOVE_ITEM CORE_SOURCES "${ENTRYPOINT_SOURCE}")
 
-# Add executable
-add_executable(${PROJECT_NAME} ${SOURCES})
+# Core library target for non-entrypoint code and shared build settings
+add_library(bdf17_core)
+target_sources(bdf17_core PRIVATE ${CORE_SOURCES})
+target_include_directories(bdf17_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_compile_options(bdf17_core PUBLIC
+    -Wall
+    -Wextra
+    -pedantic
+    -Werror
+    -Ofast
+    -march=native
+    -mavx2
+    -funroll-loops
+    -ftree-vectorize
+    -fopenmp
+    -Wno-unused-parameter
+)
+
+# Add executable entrypoint
+add_executable(${PROJECT_NAME} ${ENTRYPOINT_SOURCE})
 set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
-
-# Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
-# Add compiler definitions or options if needed
-# target_compile_definitions(${PROJECT_NAME} PRIVATE SOME_DEFINITION)
-target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic -Werror -Ofast -march=native -mavx2 -funroll-loops -ftree-vectorize -fopenmp -Wno-unused-parameter)
+target_link_libraries(${PROJECT_NAME} PRIVATE bdf17_core)
 
 # Enable testing
 enable_testing()
