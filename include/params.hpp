@@ -1,0 +1,52 @@
+#ifndef BDF17_PARAMS_HPP
+#define BDF17_PARAMS_HPP
+
+#include <cstddef>
+#include <cstdint>
+
+#include "ntt.h"
+#include "poly.h"
+#include "rlwe.h"
+
+namespace bdf17 {
+
+struct DefaultParams {
+    // n, t, B
+    static constexpr size_t kLweDimension = 600;
+    static constexpr uint64_t kPlainModulus = 64;
+    static constexpr uint64_t kKeySwitchBase = 1ULL << 8;
+
+    static constexpr size_t kNumTrials = 8;
+    static constexpr double kLweSecretDensity = 0.33;
+    static constexpr double kAccumulatorSecretDensity = 0.3;
+
+    // Accumulator rings
+    using NTTp = CircNTT<72057421557668737LL, 5LL, 1153, 5>;
+    using NTTq = CircNTT<72057421557668737LL, 5LL, 1297, 10>;
+
+    // Mod-switched rings used before ExpCRT
+    using NTTpt = CircNTT<108533126017LL, 10LL, 1153, 5>;
+    using NTTqt = CircNTT<108533126017LL, 10LL, 1297, 10>;
+
+    using NTTpq = TensorNTTImpl<NTTpt, NTTqt>;
+
+    using PolyP = Poly<NTTp>;
+    using PolyQ = Poly<NTTq>;
+    using PolyPt = Poly<NTTpt>;
+    using PolyQt = Poly<NTTqt>;
+    using PolyPQ = Poly<NTTpq>;
+
+    using Z = NTTpq::Z;
+
+    using SchemeP = SchemeImpl<PolyP, kKeySwitchBase>;
+    using SchemeQ = SchemeImpl<PolyQ, kKeySwitchBase>;
+    using SchemePQ = SchemeImpl<PolyPQ, kKeySwitchBase>;
+    using SchemePt = SchemeImpl<PolyPt, kKeySwitchBase>;
+    using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
+
+    static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
+};
+
+} // namespace bdf17
+
+#endif // BDF17_PARAMS_HPP

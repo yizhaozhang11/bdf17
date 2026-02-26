@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 project(bdf17 VERSION 1.0.0 LANGUAGES CXX)
 
 # Set the C++ standard
@@ -15,27 +15,46 @@ option(ENABLE_BENCHMARKS "Enable benchmarking with Google Benchmark" ON)
 
 # Add source files
 file(GLOB_RECURSE PROJECT_SOURCES "src/*.cpp")
-set(ENTRYPOINT_SOURCE "${PROJECT_SOURCE_DIR}/src/bdf17.cpp")
+set(ENTRYPOINT_SOURCE "${PROJECT_SOURCE_DIR}/src/main.cpp")
 set(CORE_SOURCES ${PROJECT_SOURCES})
 list(REMOVE_ITEM CORE_SOURCES "${ENTRYPOINT_SOURCE}")
 
 # Core library target for non-entrypoint code and shared build settings
-add_library(bdf17_core)
-target_sources(bdf17_core PRIVATE ${CORE_SOURCES})
-target_include_directories(bdf17_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_compile_options(bdf17_core PUBLIC
-    -Wall
-    -Wextra
-    -pedantic
-    -Werror
-    -Ofast
-    -march=native
-    -mavx2
-    -funroll-loops
-    -ftree-vectorize
-    -fopenmp
-    -Wno-unused-parameter
-)
+if(CORE_SOURCES)
+    add_library(bdf17_core)
+    target_sources(bdf17_core PRIVATE ${CORE_SOURCES})
+    target_include_directories(bdf17_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
+    target_compile_options(bdf17_core PUBLIC
+        -Wall
+        -Wextra
+        -pedantic
+        -Werror
+        -Ofast
+        -march=native
+        -mavx2
+        -funroll-loops
+        -ftree-vectorize
+        -fopenmp
+        -Wno-unused-parameter
+    )
+else()
+    # Support single-file layouts where only the executable entrypoint exists.
+    add_library(bdf17_core INTERFACE)
+    target_include_directories(bdf17_core INTERFACE ${PROJECT_SOURCE_DIR}/include)
+    target_compile_options(bdf17_core INTERFACE
+        -Wall
+        -Wextra
+        -pedantic
+        -Werror
+        -Ofast
+        -march=native
+        -mavx2
+        -funroll-loops
+        -ftree-vectorize
+        -fopenmp
+        -Wno-unused-parameter
+    )
+endif()
 
 # Add executable entrypoint
 add_executable(${PROJECT_NAME} ${ENTRYPOINT_SOURCE})

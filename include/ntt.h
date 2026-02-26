@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -501,8 +502,8 @@ public:
     static_assert(NTTp::g == NTTq::g, "g must be the same");
 
     static void ForwardNTT(uint64_t a[]) {
-        std::array<uint64_t, N> scratch{};
-        ForwardNTT(a, scratch.data());
+        auto scratch = std::make_unique<uint64_t[]>(N);
+        ForwardNTT(a, scratch.get());
     }
 
     static void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
@@ -531,8 +532,8 @@ public:
     }
 
     static void InverseNTT(uint64_t a[]) {
-        std::array<uint64_t, N> scratch{};
-        InverseNTT(a, scratch.data());
+        auto scratch = std::make_unique<uint64_t[]>(N);
+        InverseNTT(a, scratch.get());
     }
 
     static void InverseNTT(uint64_t a[], uint64_t scratch[]) {
