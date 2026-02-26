@@ -61,6 +61,8 @@ public:
     constexpr static size_t v = CompileComputev(N);
     constexpr static size_t V = CompileComputeV(N);
 
+    static_assert(N == U * V, "CT23 requires O - 1 to factor as 2^u * 3^v");
+
     constexpr static uint64_t ComputeOmegaO() {
         return Z::Pow(g, (p - 1) / O);
     }
@@ -436,7 +438,10 @@ public:
     using PrimitiveNTT = NTT<p_, g_, O_, w_>;
 
     constexpr static uint64_t p = p_;
-    constexpr static size_t N = O_;
+    constexpr static uint64_t g = g_;
+    constexpr static size_t O = O_;
+    constexpr static size_t w = w_;
+    constexpr static size_t N = O;
 
     using Z = Zp<p>;
 

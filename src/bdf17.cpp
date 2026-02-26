@@ -42,18 +42,24 @@ std::mt19937 engine(std::random_device{}());
 std::uniform_int_distribution<size_t> distributionp(0, pq - 1);
 
 template <typename PolyPT, typename PolyQT>
-Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const PolyPT &a, const PolyQT &b) {
+void Tensor(Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> &out, const PolyPT &a, const PolyQT &b) {
     if (a.is_coeff || b.is_coeff) {
         throw std::runtime_error("Tensor product is not supported for coefficient domain");
     }
 
-    Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> c(false);
+    out.is_coeff = false;
     for (size_t i = 0; i < PolyPT::N; i++) {
         for (size_t j = 0; j < PolyQT::N; j++) {
-            c.a[i * PolyQT::N + j] = Z::Mul(a.a[i], b.a[j]);
+            out.a[i * PolyQT::N + j] = Z::Mul(a.a[i], b.a[j]);
         }
     }
-    return c;
+}
+
+template <typename PolyPT, typename PolyQT>
+Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const PolyPT &a, const PolyQT &b) {
+    Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> out(false);
+    Tensor(out, a, b);
+    return out;
 }
 
 template <typename PolyPT, typename PolyQT>
@@ -136,14 +142,22 @@ uint64_t TracePtoZ(const Poly &a) {
     }
 }
 
-PolyPQ ConstructF(std::vector<size_t> &f) {
-    PolyPQ a(true);
+void ConstructF(PolyPQ &out, const std::vector<size_t> &f) {
+    out.is_coeff = true;
+    for (size_t i = 0; i < PolyPQ::N; i++) {
+        out.a[i] = 0;
+    }
     for (size_t k = 0; k < f.size(); k++) {
         size_t i = k % PolyP::O;
         size_t j = k % PolyQ::O;
-        a.a[i * PolyQ::N + j] = f[k];
+        out.a[i * PolyQ::N + j] = f[k];
     }
-    return a;
+}
+
+PolyPQ ConstructF(const std::vector<size_t> &f) {
+    PolyPQ out(true);
+    ConstructF(out, f);
+    return out;
 }
 
 std::uniform_int_distribution<size_t> distribution(0, Qplain - 1);
@@ -218,7 +232,8 @@ int main() {
 
         auto tensor_ct = schemePQ.KeySwitch(ctpq, tensorBK);
 
-        auto f = ConstructF(f_ct);
+        PolyPQ f(true);
+        ConstructF(f, f_ct);
         f.ToNTT();
 
         tensor_ct[0] = f * tensor_ct[0];

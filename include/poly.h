@@ -1,9 +1,12 @@
 #ifndef POLY_H
 #define POLY_H
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <type_traits>
+#include <vector>
 
 #include <iostream>
 
@@ -22,15 +25,36 @@ public:
     using Z = Zp<p>;
 
     bool is_coeff = false;
-    uint64_t a[N];
+    std::unique_ptr<uint64_t[]> a;
 
-    Poly(bool is_coeff_ = true) : is_coeff(is_coeff_), a{} {}
+    Poly(bool is_coeff_ = true) : is_coeff(is_coeff_), a(std::make_unique<uint64_t[]>(N)) {
+        std::fill_n(a.get(), N, 0);
+    }
+
+    Poly(const Poly &rhs) : is_coeff(rhs.is_coeff), a(std::make_unique<uint64_t[]>(N)) {
+        std::copy(rhs.a.get(), rhs.a.get() + N, a.get());
+    }
+
+    Poly &operator=(const Poly &rhs) {
+        if (this == &rhs) {
+            return *this;
+        }
+        is_coeff = rhs.is_coeff;
+        if (!a) {
+            a = std::make_unique<uint64_t[]>(N);
+        }
+        std::copy(rhs.a.get(), rhs.a.get() + N, a.get());
+        return *this;
+    }
+
+    Poly(Poly &&) noexcept = default;
+    Poly &operator=(Poly &&) noexcept = default;
 
     void ToCoeff() {
         if (is_coeff) {
             return;
         }
-        NTT::GetInstance().InverseNTT(a);
+        NTT::GetInstance().InverseNTT(a.get());
         is_coeff = true;
     }
 
@@ -38,7 +62,7 @@ public:
         if (!is_coeff) {
             return;
         }
-        NTT::GetInstance().ForwardNTT(a);
+        NTT::GetInstance().ForwardNTT(a.get());
         is_coeff = false;
     }
 
