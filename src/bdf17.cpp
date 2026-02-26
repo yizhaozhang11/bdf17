@@ -26,39 +26,39 @@ using PolyPQ = Poly<NTTpq>;
 
 using Z = NTTpq::Z;
 
-constexpr size_t n = 600;
-constexpr uint64_t Qplain = 64;
-constexpr uint64_t Bks = 1 << 8;
+constexpr size_t kSecretDim = 600;
+constexpr uint64_t kPlainModulus = 64;
+constexpr uint64_t kKeySwitchBase = 1 << 8;
 constexpr size_t pq = PolyP::N * PolyQ::N;
-constexpr size_t N_tests = 8;
+constexpr size_t kNumTests = 8;
 
-using SchemeP = SchemeImpl<PolyP, Bks>;
-using SchemeQ = SchemeImpl<PolyQ, Bks>;
-using SchemePQ = SchemeImpl<PolyPQ, Bks>;
-using SchemePt = SchemeImpl<PolyPt, Bks>;
-using SchemeQt = SchemeImpl<PolyQt, Bks>;
+using SchemeP = SchemeImpl<PolyP, kKeySwitchBase>;
+using SchemeQ = SchemeImpl<PolyQ, kKeySwitchBase>;
+using SchemePQ = SchemeImpl<PolyPQ, kKeySwitchBase>;
+using SchemePt = SchemeImpl<PolyPt, kKeySwitchBase>;
+using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
 
 std::mt19937 engine(std::random_device{}());
-std::uniform_int_distribution<size_t> distributionp(0, pq - 1);
+std::uniform_int_distribution<size_t> sampleIndexDist(0, pq - 1);
 
 template <typename PolyPT, typename PolyQT>
-void Tensor(Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> &out, const PolyPT &a, const PolyQT &b) {
-    if (a.is_coeff || b.is_coeff) {
+void Tensor(Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> &out, const PolyPT &lhs, const PolyQT &rhs) {
+    if (lhs.is_coeff || rhs.is_coeff) {
         throw std::runtime_error("Tensor product is not supported for coefficient domain");
     }
 
     out.is_coeff = false;
     for (size_t i = 0; i < PolyPT::N; i++) {
         for (size_t j = 0; j < PolyQT::N; j++) {
-            out.a[i * PolyQT::N + j] = Z::Mul(a.a[i], b.a[j]);
+            out.a[i * PolyQT::N + j] = Z::Mul(lhs.a[i], rhs.a[j]);
         }
     }
 }
 
 template <typename PolyPT, typename PolyQT>
-Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const PolyPT &a, const PolyQT &b) {
+Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const PolyPT &lhs, const PolyQT &rhs) {
     Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> out(false);
-    Tensor(out, a, b);
+    Tensor(out, lhs, rhs);
     return out;
 }
 
@@ -100,11 +100,11 @@ typename SchemePQ::RLWEKey TensorKey(const SchemePt::RLWEKey &skp, const SchemeQ
 
 typename SchemePQ::RLWECiphertext TensorCt(const SchemePt::RLWECiphertext &ctp, const SchemeQt::RLWECiphertext &ctq) {
     typename SchemePQ::RLWECiphertext ct;
-    uint64_t z = SchemePQ::Q - Qplain;
-    ct.push_back(Tensor(ctp[0], ctq[0]) * z);
-    ct.push_back(Tensor(ctp[0], ctq[1]) * z);
-    ct.push_back(Tensor(ctp[1], ctq[0]) * z);
-    ct.push_back(Tensor(ctp[1], ctq[1]) * z);
+    uint64_t scalingFactor = SchemePQ::Q - kPlainModulus;
+    ct.push_back(Tensor(ctp[0], ctq[0]) * scalingFactor);
+    ct.push_back(Tensor(ctp[0], ctq[1]) * scalingFactor);
+    ct.push_back(Tensor(ctp[1], ctq[0]) * scalingFactor);
+    ct.push_back(Tensor(ctp[1], ctq[1]) * scalingFactor);
     return ct;
 }
 
@@ -160,24 +160,24 @@ PolyPQ ConstructF(const std::vector<size_t> &f) {
     return out;
 }
 
-std::uniform_int_distribution<size_t> distribution(0, Qplain - 1);
+std::uniform_int_distribution<size_t> plainDist(0, kPlainModulus - 1);
 
 int main() {
 
     START_TIMER;
 
-    std::vector<int64_t> sk = GaussianSampler<n>::GetInstance().SampleSk(0.33);
+    std::vector<int64_t> sk = GaussianSampler<kSecretDim>::GetInstance().SampleSk(0.33);
 
-    std::vector<size_t> f_plain(Qplain, 0);
+    std::vector<size_t> plainLut(kPlainModulus, 0);
 
     // define f
-    for (size_t i = 0; i < Qplain; i++) {
-        f_plain[i] = i & 1;
+    for (size_t i = 0; i < kPlainModulus; i++) {
+        plainLut[i] = i & 1;
     }
 
     std::vector<size_t> f_ct(pq, 0);
     for (size_t i = 0; i < pq; i++) {
-        f_ct[i] = f_plain[(size_t)(0.5 + (double)Qplain * i / pq) % Qplain];
+        f_ct[i] = plainLut[(size_t)(0.5 + (double)kPlainModulus * i / pq) % kPlainModulus];
     }
 
     for (size_t i = 1, j = pq - 1; i < j; i++, j--) {
@@ -189,10 +189,10 @@ int main() {
 
     SchemeP schemeP(skp);
     schemeP.GaloisKeyGen();
-    auto BKp = schemeP.BootstrappingKeyGen(sk);
+    auto bootstrappingKeyP = schemeP.BootstrappingKeyGen(sk);
     SchemeQ schemeQ(skq);
     schemeQ.GaloisKeyGen();
-    auto BKq = schemeQ.BootstrappingKeyGen(sk);
+    auto bootstrappingKeyQ = schemeQ.BootstrappingKeyGen(sk);
 
     SchemePt schemePt(skp);
     SchemeQt schemeQt(skq);
@@ -204,25 +204,25 @@ int main() {
 
     END_TIMER;
 
-    for (size_t n_test = 0; n_test < N_tests; n_test++) {
+    for (size_t testIndex = 0; testIndex < kNumTests; testIndex++) {
 
-        std::vector<int64_t> a(n);
-        for (size_t i = 0; i < n; i++) {
-            a[i] = distributionp(engine);
+        std::vector<int64_t> a(kSecretDim);
+        for (size_t i = 0; i < kSecretDim; i++) {
+            a[i] = sampleIndexDist(engine);
         }
 
-        int64_t b0 = distribution(engine);
+        int64_t b0 = plainDist(engine);
 
-        int64_t b = b0 * pq / Qplain;
-        for (size_t i = 0; i < n; i++) {
+        int64_t b = b0 * pq / kPlainModulus;
+        for (size_t i = 0; i < kSecretDim; i++) {
             b = (b + sk[i] * a[i]) % (int64_t)pq;
         }
         b = (b + pq) % pq;
 
         START_TIMER;
 
-        auto ctp = SchemeP::ModSwitch<SchemePt>(schemeP.Process(BKp, a, b, Qplain));
-        auto ctq = SchemeQ::ModSwitch<SchemeQt>(schemeQ.Process(BKq, a, b, Qplain));
+        auto ctp = SchemeP::ModSwitch<SchemePt>(schemeP.Process(bootstrappingKeyP, a, b, kPlainModulus));
+        auto ctq = SchemeQ::ModSwitch<SchemeQt>(schemeQ.Process(bootstrappingKeyQ, a, b, kPlainModulus));
 
         END_TIMER;
 
@@ -240,26 +240,24 @@ int main() {
         tensor_ct[1] = f * tensor_ct[1];
 
         SchemePt::RLWECiphertext ct_trace = {TracePQtoP(tensor_ct[0]), TracePQtoP(tensor_ct[1])};
-        SchemePt::RLWEKey sk_trace = {TracePQtoP(skp0[0])};
-
         auto b_out = TracePtoZ(ct_trace[1]);
 
-        std::vector<uint64_t> a_out(n);
+        std::vector<uint64_t> a_out(kSecretDim);
         ct_trace[0].ToCoeff();
         a_out[0] = ct_trace[0].a[0];
-        for (size_t i = 1; i < n; i++) {
+        for (size_t i = 1; i < kSecretDim; i++) {
             a_out[i] = ct_trace[0].a[PolyP::N - i];
         }
 
         END_TIMER;
 
-        for (size_t i = 0; i < n; i++) {
+        for (size_t i = 0; i < kSecretDim; i++) {
             b_out = Z::Sub(b_out, Z::Mul(sk[i] + Z::p, a_out[i]));
         }
-        std::cout << "result: " << (size_t)(0.5 + (double)Qplain * b_out / Z::p) % Qplain << std::endl;
-        std::cout << "expected: " << f_plain[b0] << std::endl;
+        std::cout << "result: " << (size_t)(0.5 + (double)kPlainModulus * b_out / Z::p) % kPlainModulus << std::endl;
+        std::cout << "expected: " << plainLut[b0] << std::endl;
 
-        if (f_plain[b0] != (size_t)(0.5 + (double)Qplain * b_out / Z::p) % Qplain) {
+        if (plainLut[b0] != (size_t)(0.5 + (double)kPlainModulus * b_out / Z::p) % kPlainModulus) {
             std::cout << "Error" << std::endl;
             return 1;
         }

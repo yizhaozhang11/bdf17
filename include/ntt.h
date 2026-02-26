@@ -25,7 +25,7 @@ public:
 
     static_assert(p % ((uint64_t)O * (O - 1)) == 1, "p must be 1 mod O * (O - 1)");
 
-    constexpr static size_t CompileComputeu(size_t N_) {
+    constexpr static size_t ComputeTwoAdicity(size_t N_) {
         size_t u_ = 0;
         while (N_ % 2 == 0) {
             N_ >>= 1;
@@ -34,11 +34,11 @@ public:
         return u_;
     }
 
-    constexpr static size_t CompileComputeU(size_t N_) {
-        return (size_t)1 << CompileComputeu(N_);
+    constexpr static size_t ComputeTwoPower(size_t N_) {
+        return (size_t)1 << ComputeTwoAdicity(N_);
     }
 
-    constexpr static size_t CompileComputev(size_t N_) {
+    constexpr static size_t ComputeThreeAdicity(size_t N_) {
         size_t v_ = 0;
         while (N_ % 3 == 0) {
             N_ /= 3;
@@ -47,19 +47,19 @@ public:
         return v_;
     }
 
-    constexpr static size_t CompileComputeV(size_t N_) {
+    constexpr static size_t ComputeThreePower(size_t N_) {
         size_t V_ = 1;
-        for (size_t i = 0; i < CompileComputev(N_); i++) {
+        for (size_t i = 0; i < ComputeThreeAdicity(N_); i++) {
             V_ *= 3;
         }
         return V_;
     }
 
     constexpr static size_t N = O - 1;
-    constexpr static size_t u = CompileComputeu(N);
-    constexpr static size_t U = CompileComputeU(N);
-    constexpr static size_t v = CompileComputev(N);
-    constexpr static size_t V = CompileComputeV(N);
+    constexpr static size_t u = ComputeTwoAdicity(N);
+    constexpr static size_t U = ComputeTwoPower(N);
+    constexpr static size_t v = ComputeThreeAdicity(N);
+    constexpr static size_t V = ComputeThreePower(N);
 
     static_assert(N == U * V, "CT23 requires O - 1 to factor as 2^u * 3^v");
 
