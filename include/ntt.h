@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <memory>
 
-#if defined(__AVX2__)
+#if defined(__AVX2__) || defined(__AVX512F__)
 #include <immintrin.h>
 #endif
 
@@ -236,6 +236,152 @@ private:
         std::copy(b, b + N, a);
     }
 
+#if defined(__AVX512F__) && defined(__AVX512DQ__)
+    // AVX-512 kernel
+    void MixedRadix23NTTAVX512(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+        for (size_t i = 0; i < N; ++i) {
+            b[i] = a[bit_reverse_table[i]];
+        }
+
+        for (size_t i = 0; i < N; i += 2) {
+            const uint64_t t = b[i + 1];
+            b[i + 1] = Z::Sub(b[i], t);
+            b[i] = Z::Add(b[i], t);
+        }
+
+        const __m512i pV = _mm512_set1_epi64((int64_t)p);
+        const __m512i p_1V = _mm512_set1_epi64((int64_t)(p - 1));
+
+        size_t l0 = 1;
+        size_t l1 = 2;
+        size_t d = N / 2;
+
+        for (size_t i = 1; i < u; ++i) {
+            l0 = (size_t)1 << i;
+            l1 = (size_t)1 << (i + 1);
+            d = N >> (i + 1);
+            for (size_t j = 0; j < N; j += l1) {
+                size_t k = 0;
+                for (; k + 7 < l0; k += 8) {
+                    const __m512i omegaV = _mm512_set_epi64(
+                        (int64_t)omega[(k + 7) * d], (int64_t)omega[(k + 6) * d], (int64_t)omega[(k + 5) * d], (int64_t)omega[(k + 4) * d],
+                        (int64_t)omega[(k + 3) * d], (int64_t)omega[(k + 2) * d], (int64_t)omega[(k + 1) * d], (int64_t)omega[(k + 0) * d]);
+                    const __m512i omegaMuV = _mm512_set_epi64(
+                        (int64_t)omega_barrett[(k + 7) * d], (int64_t)omega_barrett[(k + 6) * d], (int64_t)omega_barrett[(k + 5) * d], (int64_t)omega_barrett[(k + 4) * d],
+                        (int64_t)omega_barrett[(k + 3) * d], (int64_t)omega_barrett[(k + 2) * d], (int64_t)omega_barrett[(k + 1) * d], (int64_t)omega_barrett[(k + 0) * d]);
+
+                    const __m512i bl0V = _mm512_loadu_si512((const void *)&b[j + l0 + k]);
+                    const __m512i tV = Z::MulConst512(bl0V, omegaV, omegaMuV);
+                    const __m512i bV = _mm512_loadu_si512((const void *)&b[j + k]);
+
+                    __m512i addV = _mm512_add_epi64(bV, tV);
+                    const __mmask8 addMask = _mm512_cmpgt_epi64_mask(addV, p_1V);
+                    addV = _mm512_mask_sub_epi64(addV, addMask, addV, pV);
+
+                    __m512i subV = _mm512_sub_epi64(bV, tV);
+                    const __mmask8 subMask = _mm512_cmpgt_epi64_mask(tV, bV);
+                    subV = _mm512_mask_add_epi64(subV, subMask, subV, pV);
+
+                    _mm512_storeu_si512((void *)&b[j + k], addV);
+                    _mm512_storeu_si512((void *)&b[j + l0 + k], subV);
+                }
+                for (; k < l0; ++k) {
+                    const uint64_t t = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
+                    b[j + l0 + k] = Z::Sub(b[j + k], t);
+                    b[j + k] = Z::Add(b[j + k], t);
+                }
+            }
+        }
+
+        const uint64_t z3 = omega[N / 3];
+        const uint64_t z3_barrett = omega_barrett[N / 3];
+        const uint64_t zz3 = omega[2 * N / 3];
+        const uint64_t zz3_barrett = omega_barrett[2 * N / 3];
+        const __m512i z3V = _mm512_set1_epi64((int64_t)z3);
+        const __m512i z3MuV = _mm512_set1_epi64((int64_t)z3_barrett);
+        const __m512i zz3V = _mm512_set1_epi64((int64_t)zz3);
+        const __m512i zz3MuV = _mm512_set1_epi64((int64_t)zz3_barrett);
+
+        for (size_t i = 0; i < v; ++i) {
+            l0 = U;
+            l1 = U * 3;
+            for (size_t j = 0; j < i; ++j) {
+                l0 *= 3;
+                l1 *= 3;
+            }
+            d = N / l1;
+            for (size_t j = 0; j < N; j += l1) {
+                size_t k = 0;
+                for (; k + 7 < l0; k += 8) {
+                    const __m512i omegaV = _mm512_set_epi64(
+                        (int64_t)omega[(k + 7) * d], (int64_t)omega[(k + 6) * d], (int64_t)omega[(k + 5) * d], (int64_t)omega[(k + 4) * d],
+                        (int64_t)omega[(k + 3) * d], (int64_t)omega[(k + 2) * d], (int64_t)omega[(k + 1) * d], (int64_t)omega[(k + 0) * d]);
+                    const __m512i omegaMuV = _mm512_set_epi64(
+                        (int64_t)omega_barrett[(k + 7) * d], (int64_t)omega_barrett[(k + 6) * d], (int64_t)omega_barrett[(k + 5) * d], (int64_t)omega_barrett[(k + 4) * d],
+                        (int64_t)omega_barrett[(k + 3) * d], (int64_t)omega_barrett[(k + 2) * d], (int64_t)omega_barrett[(k + 1) * d], (int64_t)omega_barrett[(k + 0) * d]);
+                    const __m512i omega2V = _mm512_set_epi64(
+                        (int64_t)omega[2 * (k + 7) * d], (int64_t)omega[2 * (k + 6) * d], (int64_t)omega[2 * (k + 5) * d], (int64_t)omega[2 * (k + 4) * d],
+                        (int64_t)omega[2 * (k + 3) * d], (int64_t)omega[2 * (k + 2) * d], (int64_t)omega[2 * (k + 1) * d], (int64_t)omega[2 * (k + 0) * d]);
+                    const __m512i omega2MuV = _mm512_set_epi64(
+                        (int64_t)omega_barrett[2 * (k + 7) * d], (int64_t)omega_barrett[2 * (k + 6) * d], (int64_t)omega_barrett[2 * (k + 5) * d], (int64_t)omega_barrett[2 * (k + 4) * d],
+                        (int64_t)omega_barrett[2 * (k + 3) * d], (int64_t)omega_barrett[2 * (k + 2) * d], (int64_t)omega_barrett[2 * (k + 1) * d], (int64_t)omega_barrett[2 * (k + 0) * d]);
+
+                    const __m512i b1V = _mm512_loadu_si512((const void *)&b[j + l0 + k]);
+                    const __m512i b2V = _mm512_loadu_si512((const void *)&b[j + l0 + l0 + k]);
+
+                    const __m512i y1V = Z::MulConst512(b1V, omegaV, omegaMuV);
+                    const __m512i y2V = Z::MulConst512(b2V, omega2V, omega2MuV);
+
+                    __m512i y0V = _mm512_add_epi64(y1V, y2V);
+                    const __mmask8 y0Mask = _mm512_cmpgt_epi64_mask(y0V, p_1V);
+                    y0V = _mm512_mask_sub_epi64(y0V, y0Mask, y0V, pV);
+
+                    __m512i tV = _mm512_add_epi64(
+                        Z::MulConst512(y1V, z3V, z3MuV),
+                        Z::MulConst512(y2V, zz3V, zz3MuV));
+                    const __mmask8 tMask = _mm512_cmpgt_epi64_mask(tV, p_1V);
+                    tV = _mm512_mask_sub_epi64(tV, tMask, tV, pV);
+
+                    __m512i ytV = _mm512_add_epi64(y0V, tV);
+                    const __mmask8 ytMask = _mm512_cmpgt_epi64_mask(ytV, p_1V);
+                    ytV = _mm512_mask_sub_epi64(ytV, ytMask, ytV, pV);
+
+                    const __m512i b0V = _mm512_loadu_si512((const void *)&b[j + k]);
+
+                    __m512i addV = _mm512_add_epi64(b0V, tV);
+                    const __mmask8 addMask = _mm512_cmpgt_epi64_mask(addV, p_1V);
+                    addV = _mm512_mask_sub_epi64(addV, addMask, addV, pV);
+
+                    __m512i subV = _mm512_sub_epi64(b0V, ytV);
+                    const __mmask8 subMask = _mm512_cmpgt_epi64_mask(ytV, b0V);
+                    subV = _mm512_mask_add_epi64(subV, subMask, subV, pV);
+
+                    __m512i bNewV = _mm512_add_epi64(b0V, y0V);
+                    const __mmask8 bMask = _mm512_cmpgt_epi64_mask(bNewV, p_1V);
+                    bNewV = _mm512_mask_sub_epi64(bNewV, bMask, bNewV, pV);
+
+                    _mm512_storeu_si512((void *)&b[j + l0 + k], addV);
+                    _mm512_storeu_si512((void *)&b[j + l0 + l0 + k], subV);
+                    _mm512_storeu_si512((void *)&b[j + k], bNewV);
+                }
+                for (; k < l0; ++k) {
+                    const uint64_t y1 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
+                    const uint64_t y2 = Z::MulFastConst(b[j + l0 + l0 + k], omega[2 * k * d], omega_barrett[2 * k * d]);
+                    const uint64_t y0 = Z::Add(y1, y2);
+                    const uint64_t t = Z::Add(
+                        Z::MulFastConst(y1, z3, z3_barrett),
+                        Z::MulFastConst(y2, zz3, zz3_barrett));
+                    b[j + l0 + k] = Z::Add(b[j + k], t);
+                    b[j + l0 + l0 + k] = Z::Sub(b[j + k], Z::Add(y0, t));
+                    b[j + k] = Z::Add(b[j + k], y0);
+                }
+            }
+        }
+
+        std::copy(b, b + N, a);
+    }
+#endif
+
 #if defined(__AVX2__)
     // AVX2 kernel
     void MixedRadix23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
@@ -368,7 +514,9 @@ private:
 #endif
 
     void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
-#if defined(__AVX2__)
+#if defined(__AVX512F__) && defined(__AVX512DQ__)
+        MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
+#elif defined(__AVX2__)
         MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
 #else
         MixedRadix23NTTScalar(a, b, omega, omega_barrett);

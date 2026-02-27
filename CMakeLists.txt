@@ -12,6 +12,18 @@ endif()
 
 # Optionally enable benchmarks
 option(ENABLE_BENCHMARKS "Enable benchmarking with Google Benchmark" ON)
+option(ENABLE_AVX512 "Enable AVX-512 NTT kernels (requires AVX-512 capable toolchain/CPU)" OFF)
+
+set(BDF17_ARCH_FLAGS
+    -march=native
+    -mavx2
+)
+if(ENABLE_AVX512)
+    list(APPEND BDF17_ARCH_FLAGS
+        -mavx512f
+        -mavx512dq
+    )
+endif()
 
 # Add source files
 file(GLOB_RECURSE PROJECT_SOURCES "src/*.cpp")
@@ -30,8 +42,7 @@ if(CORE_SOURCES)
         -pedantic
         -Werror
         -Ofast
-        -march=native
-        -mavx2
+        ${BDF17_ARCH_FLAGS}
         -funroll-loops
         -ftree-vectorize
         -fopenmp
@@ -47,8 +58,7 @@ else()
         -pedantic
         -Werror
         -Ofast
-        -march=native
-        -mavx2
+        ${BDF17_ARCH_FLAGS}
         -funroll-loops
         -ftree-vectorize
         -fopenmp

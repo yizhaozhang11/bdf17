@@ -12,6 +12,7 @@
 
 # Build directories
 /build/
+/build-*/
 /bin/
 /lib/
 /out/
@@ -92,3 +93,4 @@ DerivedData/
 .DS_Store
 Thumbs.db
 *.sage.py
+/ref/
