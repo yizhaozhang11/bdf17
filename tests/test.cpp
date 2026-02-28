@@ -3,11 +3,13 @@
 #include <cstdlib>
 #include <random>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "ntt.h"
+#include "params.hpp"
 #include "poly.h"
 #include "rlwe.h"
 
@@ -17,6 +19,8 @@ using PrimitiveToy = NTT<1093ULL, 5ULL, 13, 2>;
 using CircToyP = CircNTT<1093ULL, 5ULL, 7, 3>;
 using CircToyQ = CircNTT<1093ULL, 5ULL, 13, 2>;
 using TensorToy = TensorNTTImpl<CircToyP, CircToyQ>;
+using CurrentCircP = bdf17::DefaultParams::NTTp;
+using CurrentCircQ = bdf17::DefaultParams::NTTq;
 
 // Edge/corner cases across mixed-radix exponents in N = 2^u * 3^v (where N = O - 1).
 using PrimitiveUV00 = NTT<72057421557668737ULL, 5ULL, 2, 1>;         // (u, v) = (0, 0), metadata-only
@@ -112,6 +116,69 @@ std::vector<uint64_t> AddMod(const std::vector<uint64_t> &lhs, const std::vector
         out[i] = (lhs[i] + rhs[i]) % Transform::p;
     }
     return out;
+}
+
+template <typename Transform>
+std::vector<std::vector<uint64_t>> BoundaryVectors() {
+    std::vector<std::vector<uint64_t>> out;
+
+    out.emplace_back(Transform::N, 0);
+    out.emplace_back(Transform::N, 1 % Transform::p);
+    out.emplace_back(Transform::N, Transform::p - 1);
+
+    std::vector<uint64_t> monomial_0(Transform::N, 0);
+    monomial_0[0] = 1;
+    out.push_back(monomial_0);
+
+    std::vector<uint64_t> monomial_mid(Transform::N, 0);
+    monomial_mid[Transform::N / 2] = 1;
+    out.push_back(monomial_mid);
+
+    std::vector<uint64_t> monomial_last(Transform::N, 0);
+    monomial_last[Transform::N - 1] = 1;
+    out.push_back(monomial_last);
+
+    std::vector<uint64_t> alternating(Transform::N, 0);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        alternating[i] = (i & 1ULL) ? (Transform::p - 1) : 0;
+    }
+    out.push_back(alternating);
+
+    std::vector<uint64_t> near_reduction(Transform::N, 0);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        switch (i % 6) {
+            case 0:
+                near_reduction[i] = Transform::p - 2;
+                break;
+            case 1:
+                near_reduction[i] = Transform::p - 1;
+                break;
+            case 2:
+                near_reduction[i] = 0;
+                break;
+            case 3:
+                near_reduction[i] = 1;
+                break;
+            case 4:
+                near_reduction[i] = 2;
+                break;
+            default:
+                near_reduction[i] = Transform::p / 2;
+                break;
+        }
+    }
+    out.push_back(near_reduction);
+
+    return out;
+}
+
+inline uint64_t SignedMod(int64_t value, uint64_t mod) {
+    const int64_t mod_i64 = static_cast<int64_t>(mod);
+    int64_t residue = value % mod_i64;
+    if (residue < 0) {
+        residue += mod_i64;
+    }
+    return static_cast<uint64_t>(residue);
 }
 
 template <typename Transform>
@@ -245,6 +312,101 @@ void ExpectCircularConvolutionViaNTT(uint64_t seed_lhs, uint64_t seed_rhs) {
     }
 }
 
+template <typename Transform>
+void ExpectBoundaryRoundTrip() {
+    const auto vectors = BoundaryVectors<Transform>();
+    for (const auto &input : vectors) {
+        auto transformed = input;
+        Forward<Transform>(transformed.data());
+        Inverse<Transform>(transformed.data());
+        EXPECT_EQ(transformed, input);
+    }
+}
+
+template <typename CircTransform>
+void ExpectBoundaryCircularConvolutionViaNTT() {
+    using PolyT = Poly<CircTransform>;
+    const auto vectors = BoundaryVectors<CircTransform>();
+
+    const std::array<std::pair<size_t, size_t>, 3> index_pairs{{
+        {1, 6}, // all ones x alternating
+        {5, 7}, // monomial_last x near_reduction
+        {4, 7}, // monomial_mid x near_reduction
+    }};
+
+    for (const auto &[lhs_idx, rhs_idx] : index_pairs) {
+        const auto &lhs = vectors[lhs_idx];
+        const auto &rhs = vectors[rhs_idx];
+        const auto expected = NaiveCircularConvolution<CircTransform>(lhs, rhs);
+
+        auto a = PolyT::FromCoeff(lhs);
+        auto b = PolyT::FromCoeff(rhs);
+        a.ToNTT();
+        b.ToNTT();
+        auto c = a * b;
+        c.ToCoeff();
+
+        for (size_t i = 0; i < CircTransform::N; ++i) {
+            EXPECT_EQ(c.a[i], expected[i]);
+        }
+    }
+}
+
+template <typename TensorTransform>
+void ExpectBoundaryTensorForward() {
+    const auto vectors = BoundaryVectors<TensorTransform>();
+    for (const auto &input : vectors) {
+        auto transformed = input;
+        Forward<TensorTransform>(transformed.data());
+        const auto expected = NaiveForwardTensor<TensorTransform>(input);
+        EXPECT_EQ(transformed, expected);
+    }
+}
+
+template <typename CircTransform>
+void ExpectCoeffGaloisActionMatchesPermutation(size_t automorphism) {
+    using PolyT = Poly<CircTransform>;
+
+    PolyT coeff(true);
+    for (size_t i = 0; i < PolyT::N; ++i) {
+        coeff.a[i] = (37 + 17 * i) % PolyT::p;
+    }
+
+    const auto actual = PolyT::GaloisConjugate(coeff, automorphism);
+    PolyT expected(true);
+    expected.a[0] = coeff.a[0];
+    for (size_t i = 1; i < PolyT::N; ++i) {
+        expected.a[i * automorphism % PolyT::O] = coeff.a[i];
+    }
+
+    for (size_t i = 0; i < PolyT::N; ++i) {
+        EXPECT_EQ(actual.a[i], expected.a[i]);
+    }
+}
+
+template <typename CircTransform>
+void ExpectEvalGaloisActionMatchesCoeffThenForward(size_t automorphism, uint64_t seed) {
+    using PolyT = Poly<CircTransform>;
+
+    auto coeff_input = PolyT::FromCoeff(RandomVector<CircTransform>(seed));
+    auto coeff_galois = PolyT::GaloisConjugate(coeff_input, automorphism);
+    auto coeff_then_forward = coeff_galois;
+    coeff_then_forward.ToNTT();
+
+    auto eval_input = coeff_input;
+    eval_input.ToNTT();
+    auto eval_galois = PolyT::GaloisConjugate(eval_input, automorphism);
+
+    for (size_t i = 0; i < PolyT::N; ++i) {
+        EXPECT_EQ(eval_galois.a[i], coeff_then_forward.a[i]);
+    }
+
+    eval_galois.ToCoeff();
+    for (size_t i = 0; i < PolyT::N; ++i) {
+        EXPECT_EQ(eval_galois.a[i], coeff_galois.a[i]);
+    }
+}
+
 } // namespace
 
 TEST(NTTPrimitive, RoundTrip) {
@@ -261,6 +423,11 @@ TEST(CircNTT, RoundTrip) {
     ExpectRoundTrip<CircToyQ>(6);
 }
 
+TEST(CircNTT, BoundaryVectorsRoundTrip) {
+    ExpectBoundaryRoundTrip<CircToyP>();
+    ExpectBoundaryRoundTrip<CircToyQ>();
+}
+
 TEST(CircNTT, Linearity) {
     ExpectLinearity<CircToyP>(7, 8);
     ExpectLinearity<CircToyQ>(9, 10);
@@ -269,6 +436,11 @@ TEST(CircNTT, Linearity) {
 TEST(CircNTT, CircularConvolutionViaNTT) {
     ExpectCircularConvolutionViaNTT<CircToyP>(11, 12);
     ExpectCircularConvolutionViaNTT<CircToyQ>(13, 14);
+}
+
+TEST(CircNTT, BoundaryVectorsCircularConvolutionViaNTT) {
+    ExpectBoundaryCircularConvolutionViaNTT<CircToyP>();
+    ExpectBoundaryCircularConvolutionViaNTT<CircToyQ>();
 }
 
 TEST(CircNTT, MatchesNaiveForwardAndInverse) {
@@ -315,6 +487,20 @@ TEST(TensorNTT, MatchesNaiveSeparableForward) {
     EXPECT_EQ(opt, naive);
 }
 
+TEST(TensorNTT, BoundaryVectorsMatchNaiveSeparableForward) {
+    ExpectBoundaryTensorForward<TensorToy>();
+}
+
+TEST(CurrentRings, BoundaryVectorsRoundTrip) {
+    ExpectBoundaryRoundTrip<CurrentCircP>();
+    ExpectBoundaryRoundTrip<CurrentCircQ>();
+}
+
+TEST(CurrentRings, BoundaryVectorsCircularConvolutionViaNTT) {
+    ExpectBoundaryCircularConvolutionViaNTT<CurrentCircP>();
+    ExpectBoundaryCircularConvolutionViaNTT<CurrentCircQ>();
+}
+
 TEST(NTTMatrix, EdgeExponentDegenerateMetadataOnly) {
     // N = 1 (u=0, v=0) is representable in metadata, but the current kernel fast path
     // is implemented for N >= 2 and is therefore not executed here.
@@ -356,16 +542,38 @@ TEST(NTTMatrix, EdgeExponentLargeCasesOptional) {
     ExpectCircularConvolutionViaNTT<CircUVnmQ>(1002, 1003);
 }
 
-TEST(PolyOps, CoeffDomainGaloisConjugatePreservesConstantTerm) {
+TEST(PolyOps, CoeffDomainGaloisConjugateMatchesPermutation) {
+    ExpectCoeffGaloisActionMatchesPermutation<CircToyP>(3);
+    ExpectCoeffGaloisActionMatchesPermutation<CircToyQ>(5);
+}
+
+TEST(PolyOps, EvalDomainGaloisConjugateMatchesCoeffThenForward) {
+    ExpectEvalGaloisActionMatchesCoeffThenForward<CircToyP>(3, 44);
+    ExpectEvalGaloisActionMatchesCoeffThenForward<CircToyQ>(5, 55);
+}
+
+TEST(PolyOps, SignedFromCoeffNormalizesNegativeMultiplesOfModulus) {
     using PolyToy = Poly<CircToyP>;
+    const int64_t p = static_cast<int64_t>(PolyToy::p);
+    const std::vector<int64_t> input{
+        0,
+        1,
+        -1,
+        p - 1,
+        p,
+        p + 1,
+        -p,
+        -p - 1,
+        -2 * p,
+        -2 * p - 1,
+        2 * p,
+        2 * p + 1,
+    };
+    auto poly = PolyToy::FromCoeff(input);
 
-    PolyToy x(true);
-    for (size_t i = 0; i < PolyToy::N; ++i) {
-        x.a[i] = (17 + i) % PolyToy::p;
+    for (size_t i = 0; i < input.size() && i < PolyToy::N; ++i) {
+        EXPECT_EQ(poly.a[i], SignedMod(input[i], PolyToy::p));
     }
-
-    auto y = PolyToy::GaloisConjugate(x, 3);
-    EXPECT_EQ(y.a[0], x.a[0]);
 }
 
 TEST(RLWESampling, EncryptSamplesZeroSumA) {

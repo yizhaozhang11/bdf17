@@ -126,11 +126,13 @@ public:
     requires std::signed_integral<T>
     static Poly FromCoeff(const std::vector<T> &v) {
         Poly ret(true);
+        constexpr int64_t mod = static_cast<int64_t>(p);
         for (size_t i = 0; i < N && i < v.size(); i++) {
-            if (v[i] < 0) {
-                ret.a[i] = v[i] % (int64_t)p + p;
+            const int64_t residue = static_cast<int64_t>(v[i]) % mod;
+            if (residue < 0) {
+                ret.a[i] = static_cast<uint64_t>(residue + mod);
             } else {
-                ret.a[i] = v[i] % p;
+                ret.a[i] = static_cast<uint64_t>(residue);
             }
         }
         return ret;

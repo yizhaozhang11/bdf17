@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#if defined(__AVX512F__) && defined(__AVX512DQ__)
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
 #include <immintrin.h>
 #endif
 
@@ -50,7 +50,7 @@ public:
         return res;
     }
 
-#if defined(__AVX512F__) && defined(__AVX512DQ__)
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
     static inline __m512i MulHi512(__m512i x, __m512i y) {
         // 64x64->128 high lane emulation using 32-bit partial products.
         const __m512i lo_mask = _mm512_set1_epi64(0x00000000ffffffffULL);

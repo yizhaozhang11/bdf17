@@ -12,17 +12,28 @@ endif()
 
 # Optionally enable benchmarks
 option(ENABLE_BENCHMARKS "Enable benchmarking with Google Benchmark" ON)
+option(ENABLE_AVX2 "Enable AVX2 NTT kernels (requires AVX2-capable toolchain/CPU)" ON)
 option(ENABLE_AVX512 "Enable AVX-512 NTT kernels (requires AVX-512 capable toolchain/CPU)" OFF)
 
 set(BDF17_ARCH_FLAGS
     -march=native
-    -mavx2
 )
+if(ENABLE_AVX2)
+    list(APPEND BDF17_ARCH_FLAGS -mavx2)
+endif()
 if(ENABLE_AVX512)
     list(APPEND BDF17_ARCH_FLAGS
         -mavx512f
         -mavx512dq
     )
+endif()
+
+set(BDF17_COMPILE_DEFS)
+if(ENABLE_AVX2)
+    list(APPEND BDF17_COMPILE_DEFS BDF17_ENABLE_AVX2=1)
+endif()
+if(ENABLE_AVX512)
+    list(APPEND BDF17_COMPILE_DEFS BDF17_ENABLE_AVX512=1)
 endif()
 
 # Add source files
@@ -48,6 +59,7 @@ if(CORE_SOURCES)
         -fopenmp
         -Wno-unused-parameter
     )
+    target_compile_definitions(bdf17_core PUBLIC ${BDF17_COMPILE_DEFS})
 else()
     # Support single-file layouts where only the executable entrypoint exists.
     add_library(bdf17_core INTERFACE)
@@ -64,6 +76,7 @@ else()
         -fopenmp
         -Wno-unused-parameter
     )
+    target_compile_definitions(bdf17_core INTERFACE ${BDF17_COMPILE_DEFS})
 endif()
 
 # Add executable entrypoint

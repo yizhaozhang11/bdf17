@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <memory>
 
-#if defined(__AVX2__) || defined(__AVX512F__)
+#if (defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)) || (defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__))
 #include <immintrin.h>
 #endif
 
@@ -236,7 +236,8 @@ private:
         std::copy(b, b + N, a);
     }
 
-#if defined(__AVX512F__) && defined(__AVX512DQ__)
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
+    static_assert(p <= (1ULL << 62), "SIMD signed-compare reductions require p <= 2^62");
     // AVX-512 kernel
     void MixedRadix23NTTAVX512(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         for (size_t i = 0; i < N; ++i) {
@@ -382,7 +383,8 @@ private:
     }
 #endif
 
-#if defined(__AVX2__)
+#if defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
+    static_assert(p <= (1ULL << 62), "SIMD signed-compare reductions require p <= 2^62");
     // AVX2 kernel
     void MixedRadix23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         for (size_t i = 0; i < N; i++) {
@@ -515,9 +517,9 @@ private:
 
     void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         static_assert(N >= 2, "MixedRadix23 NTT kernel requires N >= 2 (equivalently O >= 3)");
-#if defined(__AVX512F__) && defined(__AVX512DQ__)
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
         MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
-#elif defined(__AVX2__)
+#elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
         MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
 #else
         MixedRadix23NTTScalar(a, b, omega, omega_barrett);
