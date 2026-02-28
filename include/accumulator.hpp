@@ -12,8 +12,8 @@ namespace bdf17 {
 
 template <typename Params = DefaultParams>
 struct AccumulatorState {
-    using PolyP = typename Params::PolyP;
-    using PolyQ = typename Params::PolyQ;
+    using EvalP = typename Params::EvalP;
+    using EvalQ = typename Params::EvalQ;
     using SchemeP = typename Params::SchemeP;
     using SchemeQ = typename Params::SchemeQ;
 
@@ -28,8 +28,8 @@ struct AccumulatorState {
     BootstrappingKeyQ bk_q;
 
     explicit AccumulatorState(const std::vector<int64_t> &lwe_secret)
-        : sk_p(GaussianSampler<PolyP::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
-          sk_q(GaussianSampler<PolyQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
+        : sk_p(GaussianSampler<EvalP::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
+          sk_q(GaussianSampler<EvalQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
           scheme_p(sk_p),
           scheme_q(sk_q) {
         if (lwe_secret.size() != Params::kLweAccumulatorDimension) {

@@ -6,7 +6,6 @@
 
 #include "ntt.h"
 #include "ntt_plan.hpp"
-#include "poly.h"
 #include "rlwe.h"
 #include "typed_poly.hpp"
 
@@ -57,13 +56,6 @@ struct DefaultParams {
     using PlanQt = CanonicalNttPlan<NTTqt>;
     using PlanPQ = CanonicalNttPlan<NTTpq>;
 
-    // Legacy aliases (kept during migration for non-RLWE components).
-    using PolyP = Poly<NTTp>;
-    using PolyQ = Poly<NTTq>;
-    using PolyPt = Poly<NTTpt>;
-    using PolyQt = Poly<NTTqt>;
-    using PolyPQ = Poly<NTTpq>;
-
     using Z = NTTpq::Z;
 
     using SchemeP = SchemeImpl<NTTp, kKeySwitchBase, PlanP>;
@@ -72,12 +64,12 @@ struct DefaultParams {
     using SchemePt = SchemeImpl<NTTpt, kKeySwitchBase, PlanPt>;
     using SchemeQt = SchemeImpl<NTTqt, kKeySwitchBase, PlanQt>;
 
-    static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
+    static constexpr size_t kTensorDimension = EvalP::N * EvalQ::N;
     static constexpr uint64_t kAccumulatorInputModulus = kTensorDimension;
     static constexpr uint64_t kExtractModulus = Z::p;
     static constexpr uint64_t kFrontendModulus = kExtractModulus;
 
-    static_assert(kLweFrontendDimension <= PolyP::N, "kLweFrontendDimension must not exceed PolyP::N");
+    static_assert(kLweFrontendDimension <= EvalP::N, "kLweFrontendDimension must not exceed EvalP::N");
     static_assert(kLweAccumulatorDimension > 0, "kLweAccumulatorDimension must be positive");
 };
 

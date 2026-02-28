@@ -8,7 +8,6 @@
 #include "ntt.h"
 #include "ntt_plan.hpp"
 #include "params.hpp"
-#include "poly.h"
 #include "typed_poly.hpp"
 
 namespace {
@@ -20,6 +19,24 @@ using CurrentCircP = bdf17::DefaultParams::NTTp;
 using CurrentCircQ = bdf17::DefaultParams::NTTq;
 using EdgeCircUV10 = CircNTT<72057421557668737ULL, 5ULL, 3, 2>;
 using EdgeCircUV1m = CircNTT<2053ULL, 2ULL, 19, 2>;
+
+template <typename Transform>
+void ForwardRaw(uint64_t *a) {
+    if constexpr (requires(uint64_t *ptr) { Transform::GetInstance().ForwardNTT(ptr); }) {
+        Transform::GetInstance().ForwardNTT(a);
+    } else {
+        Transform::ForwardNTT(a);
+    }
+}
+
+template <typename Transform>
+void InverseRaw(uint64_t *a) {
+    if constexpr (requires(uint64_t *ptr) { Transform::GetInstance().InverseNTT(ptr); }) {
+        Transform::GetInstance().InverseNTT(a);
+    } else {
+        Transform::InverseNTT(a);
+    }
+}
 
 template <typename Transform>
 std::vector<uint64_t> RandomCoeffVector(uint64_t seed) {
@@ -34,9 +51,8 @@ std::vector<uint64_t> RandomCoeffVector(uint64_t seed) {
 }
 
 template <typename Transform, Backend B>
-void ExpectPlanMatchesLegacyForwardInverse(uint64_t seed) {
+void ExpectPlanMatchesTransformForwardInverse(uint64_t seed) {
     using Plan = CanonicalNttPlan<Transform, B>;
-    using LegacyPoly = Poly<Transform>;
     using Coeff = CoeffPoly<Transform>;
 
     const auto input = RandomCoeffVector<Transform>(seed);
@@ -46,22 +62,24 @@ void ExpectPlanMatchesLegacyForwardInverse(uint64_t seed) {
     const auto eval = plan.forward(coeff);
     const auto roundtrip = plan.inverse(eval);
 
-    auto legacy = LegacyPoly::FromCoeff(input);
-    auto legacy_eval = legacy;
-    legacy_eval.ToNTT();
-    auto legacy_roundtrip = legacy_eval;
-    legacy_roundtrip.ToCoeff();
+    auto expected_eval = input;
+    ForwardRaw<Transform>(expected_eval.data());
 
     for (size_t i = 0; i < Transform::N; ++i) {
-        EXPECT_EQ(eval[i], legacy_eval.a[i]);
-        EXPECT_EQ(roundtrip[i], legacy_roundtrip.a[i]);
+        EXPECT_EQ(eval[i], expected_eval[i]);
+    }
+
+    auto expected_roundtrip = expected_eval;
+    InverseRaw<Transform>(expected_roundtrip.data());
+    for (size_t i = 0; i < Transform::N; ++i) {
+        EXPECT_EQ(roundtrip[i], expected_roundtrip[i]);
         EXPECT_EQ(roundtrip[i], input[i]);
     }
 }
 
 template <typename Transform>
-void ExpectAutoMatchesLegacy(uint64_t seed) {
-    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Auto>(seed);
+void ExpectAutoMatchesDirectTransform(uint64_t seed) {
+    ExpectPlanMatchesTransformForwardInverse<Transform, Backend::Auto>(seed);
 }
 
 template <typename Transform, Backend B>
@@ -125,16 +143,16 @@ void ExpectWorkspaceReuse(uint64_t seed) {
 
 } // namespace
 
-TEST(NttPlan, CircPAutoMatchesLegacySemantics) {
-    ExpectAutoMatchesLegacy<CircToyP>(101);
+TEST(NttPlan, CircPAutoMatchesTransformSemantics) {
+    ExpectAutoMatchesDirectTransform<CircToyP>(101);
 }
 
-TEST(NttPlan, CircQAutoMatchesLegacySemantics) {
-    ExpectAutoMatchesLegacy<CircToyQ>(201);
+TEST(NttPlan, CircQAutoMatchesTransformSemantics) {
+    ExpectAutoMatchesDirectTransform<CircToyQ>(201);
 }
 
-TEST(NttPlan, TensorAutoMatchesLegacySemantics) {
-    ExpectAutoMatchesLegacy<TensorToy>(301);
+TEST(NttPlan, TensorAutoMatchesTransformSemantics) {
+    ExpectAutoMatchesDirectTransform<TensorToy>(301);
 }
 
 TEST(NttPlan, ScalarVsAvxBackendsMatchOnDefaultRings) {

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "ntt.h"
-#include "poly.h"
 #include "rlwe.h"
 
 namespace bdf17::equiv_ref {
@@ -51,11 +50,6 @@ struct ToyEqParams {
     using PlanQt = CanonicalNttPlan<NTTqt>;
     using PlanPQ = CanonicalNttPlan<NTTpq>;
 
-    using PolyP = Poly<NTTp>;
-    using PolyQ = Poly<NTTq>;
-    using PolyPt = Poly<NTTpt>;
-    using PolyQt = Poly<NTTqt>;
-    using PolyPQ = Poly<NTTpq>;
     using Z = NTTpq::Z;
 
     using SchemeP = SchemeImpl<NTTp, kKeySwitchBase>;
@@ -64,7 +58,7 @@ struct ToyEqParams {
     using SchemeQt = SchemeImpl<NTTqt, kKeySwitchBase>;
     using SchemePQ = SchemeImpl<NTTpq, kKeySwitchBase>;
 
-    static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
+    static constexpr size_t kTensorDimension = EvalP::N * EvalQ::N;
     static constexpr uint64_t kAccumulatorInputModulus = kTensorDimension;
     static constexpr uint64_t kExtractModulus = Z::p;
     static constexpr uint64_t kFrontendModulus = kExtractModulus;
@@ -103,9 +97,9 @@ inline uint64_t InvMod(uint64_t a, uint64_t mod) {
     return PowMod(reduced, mod - 2, mod);
 }
 
-inline constexpr size_t kP = ToyEqParams::PolyP::N;
-inline constexpr size_t kQ = ToyEqParams::PolyQ::N;
-inline constexpr size_t kPQ = ToyEqParams::PolyPQ::N;
+inline constexpr size_t kP = ToyEqParams::EvalP::N;
+inline constexpr size_t kQ = ToyEqParams::EvalQ::N;
+inline constexpr size_t kPQ = ToyEqParams::EvalPQ::N;
 inline constexpr uint64_t kMod = ToyEqParams::Z::p;
 
 inline const uint64_t kAlpha = InvMod(kQ % kP, kP);

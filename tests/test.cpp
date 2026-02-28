@@ -9,9 +9,10 @@
 #include <gtest/gtest.h>
 
 #include "ntt.h"
+#include "ntt_plan.hpp"
 #include "params.hpp"
-#include "poly.h"
 #include "rlwe.h"
+#include "typed_poly.hpp"
 
 namespace {
 
@@ -294,21 +295,23 @@ std::vector<uint64_t> NaiveForwardTensor(const std::vector<uint64_t> &coeffs) {
 
 template <typename CircTransform>
 void ExpectCircularConvolutionViaNTT(uint64_t seed_lhs, uint64_t seed_rhs) {
-    using PolyT = Poly<CircTransform>;
+    using Coeff = CoeffPoly<CircTransform>;
+    using Eval = EvalPoly<CircTransform>;
+    CanonicalNttPlan<CircTransform> plan;
 
     auto lhs = RandomVector<CircTransform>(seed_lhs);
     auto rhs = RandomVector<CircTransform>(seed_rhs);
     auto expected = NaiveCircularConvolution<CircTransform>(lhs, rhs);
 
-    auto a = PolyT::FromCoeff(lhs);
-    auto b = PolyT::FromCoeff(rhs);
-    a.ToNTT();
-    b.ToNTT();
-    auto c = a * b;
-    c.ToCoeff();
+    Coeff a_coeff = Coeff::FromUnsigned(lhs);
+    Coeff b_coeff = Coeff::FromUnsigned(rhs);
+    Eval a_eval = plan.forward(a_coeff);
+    Eval b_eval = plan.forward(b_coeff);
+    Eval c_eval = a_eval * b_eval;
+    Coeff c_coeff = plan.inverse(c_eval);
 
     for (size_t i = 0; i < CircTransform::N; ++i) {
-        EXPECT_EQ(c.a[i], expected[i]);
+        EXPECT_EQ(c_coeff[i], expected[i]);
     }
 }
 
@@ -325,7 +328,9 @@ void ExpectBoundaryRoundTrip() {
 
 template <typename CircTransform>
 void ExpectBoundaryCircularConvolutionViaNTT() {
-    using PolyT = Poly<CircTransform>;
+    using Coeff = CoeffPoly<CircTransform>;
+    using Eval = EvalPoly<CircTransform>;
+    CanonicalNttPlan<CircTransform> plan;
     const auto vectors = BoundaryVectors<CircTransform>();
 
     const std::array<std::pair<size_t, size_t>, 3> index_pairs{{
@@ -339,15 +344,15 @@ void ExpectBoundaryCircularConvolutionViaNTT() {
         const auto &rhs = vectors[rhs_idx];
         const auto expected = NaiveCircularConvolution<CircTransform>(lhs, rhs);
 
-        auto a = PolyT::FromCoeff(lhs);
-        auto b = PolyT::FromCoeff(rhs);
-        a.ToNTT();
-        b.ToNTT();
-        auto c = a * b;
-        c.ToCoeff();
+        Coeff a_coeff = Coeff::FromUnsigned(lhs);
+        Coeff b_coeff = Coeff::FromUnsigned(rhs);
+        Eval a_eval = plan.forward(a_coeff);
+        Eval b_eval = plan.forward(b_coeff);
+        Eval c_eval = a_eval * b_eval;
+        Coeff c_coeff = plan.inverse(c_eval);
 
         for (size_t i = 0; i < CircTransform::N; ++i) {
-            EXPECT_EQ(c.a[i], expected[i]);
+            EXPECT_EQ(c_coeff[i], expected[i]);
         }
     }
 }
@@ -365,45 +370,45 @@ void ExpectBoundaryTensorForward() {
 
 template <typename CircTransform>
 void ExpectCoeffGaloisActionMatchesPermutation(size_t automorphism) {
-    using PolyT = Poly<CircTransform>;
+    using Coeff = CoeffPoly<CircTransform>;
 
-    PolyT coeff(true);
-    for (size_t i = 0; i < PolyT::N; ++i) {
-        coeff.a[i] = (37 + 17 * i) % PolyT::p;
+    Coeff coeff;
+    for (size_t i = 0; i < Coeff::N; ++i) {
+        coeff[i] = (37 + 17 * i) % Coeff::p;
     }
 
-    const auto actual = PolyT::GaloisConjugate(coeff, automorphism);
-    PolyT expected(true);
-    expected.a[0] = coeff.a[0];
-    for (size_t i = 1; i < PolyT::N; ++i) {
-        expected.a[i * automorphism % PolyT::O] = coeff.a[i];
+    const auto actual = GaloisApply(coeff, automorphism);
+    Coeff expected;
+    expected[0] = coeff[0];
+    for (size_t i = 1; i < Coeff::N; ++i) {
+        expected[i * automorphism % Coeff::O] = coeff[i];
     }
 
-    for (size_t i = 0; i < PolyT::N; ++i) {
-        EXPECT_EQ(actual.a[i], expected.a[i]);
+    for (size_t i = 0; i < Coeff::N; ++i) {
+        EXPECT_EQ(actual[i], expected[i]);
     }
 }
 
 template <typename CircTransform>
 void ExpectEvalGaloisActionMatchesCoeffThenForward(size_t automorphism, uint64_t seed) {
-    using PolyT = Poly<CircTransform>;
+    using Coeff = CoeffPoly<CircTransform>;
+    using Eval = EvalPoly<CircTransform>;
+    CanonicalNttPlan<CircTransform> plan;
 
-    auto coeff_input = PolyT::FromCoeff(RandomVector<CircTransform>(seed));
-    auto coeff_galois = PolyT::GaloisConjugate(coeff_input, automorphism);
-    auto coeff_then_forward = coeff_galois;
-    coeff_then_forward.ToNTT();
+    auto coeff_input = Coeff::FromUnsigned(RandomVector<CircTransform>(seed));
+    auto coeff_galois = GaloisApply(coeff_input, automorphism);
+    auto coeff_then_forward = plan.forward(coeff_galois);
 
-    auto eval_input = coeff_input;
-    eval_input.ToNTT();
-    auto eval_galois = PolyT::GaloisConjugate(eval_input, automorphism);
+    Eval eval_input = plan.forward(coeff_input);
+    auto eval_galois = GaloisApply(eval_input, automorphism);
 
-    for (size_t i = 0; i < PolyT::N; ++i) {
-        EXPECT_EQ(eval_galois.a[i], coeff_then_forward.a[i]);
+    for (size_t i = 0; i < Eval::N; ++i) {
+        EXPECT_EQ(eval_galois[i], coeff_then_forward[i]);
     }
 
-    eval_galois.ToCoeff();
-    for (size_t i = 0; i < PolyT::N; ++i) {
-        EXPECT_EQ(eval_galois.a[i], coeff_galois.a[i]);
+    Coeff eval_back = plan.inverse(eval_galois);
+    for (size_t i = 0; i < Coeff::N; ++i) {
+        EXPECT_EQ(eval_back[i], coeff_galois[i]);
     }
 }
 
@@ -553,8 +558,8 @@ TEST(PolyOps, EvalDomainGaloisConjugateMatchesCoeffThenForward) {
 }
 
 TEST(PolyOps, SignedFromCoeffNormalizesNegativeMultiplesOfModulus) {
-    using PolyToy = Poly<CircToyP>;
-    const int64_t p = static_cast<int64_t>(PolyToy::p);
+    using CoeffToy = CoeffPoly<CircToyP>;
+    const int64_t p = static_cast<int64_t>(CoeffToy::p);
     const std::vector<int64_t> input{
         0,
         1,
@@ -569,10 +574,10 @@ TEST(PolyOps, SignedFromCoeffNormalizesNegativeMultiplesOfModulus) {
         2 * p,
         2 * p + 1,
     };
-    auto poly = PolyToy::FromCoeff(input);
+    auto coeff = CoeffToy::FromSigned(input);
 
-    for (size_t i = 0; i < input.size() && i < PolyToy::N; ++i) {
-        EXPECT_EQ(poly.a[i], SignedMod(input[i], PolyToy::p));
+    for (size_t i = 0; i < input.size() && i < CoeffToy::N; ++i) {
+        EXPECT_EQ(coeff[i], SignedMod(input[i], CoeffToy::p));
     }
 }
 

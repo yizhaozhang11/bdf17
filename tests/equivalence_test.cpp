@@ -60,18 +60,6 @@ using bdf17::equiv_ref::kQ;
 constexpr size_t kRandomCases = 16;
 
 template <typename PolyT>
-std::vector<uint64_t> ToCoeffVector(PolyT poly)
-requires requires { poly.is_coeff; poly.a[0]; }
-{
-    poly.ToCoeff();
-    std::vector<uint64_t> out(PolyT::N, 0);
-    for (size_t i = 0; i < PolyT::N; ++i) {
-        out[i] = poly.a[i];
-    }
-    return out;
-}
-
-template <typename PolyT>
 std::vector<uint64_t> ToCoeffVector(const PolyT &poly)
 requires requires { typename PolyT::Domain; typename PolyT::TransformType; }
 {
