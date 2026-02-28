@@ -40,11 +40,11 @@ struct ToyEqParams {
     using PolyPQ = Poly<NTTpq>;
     using Z = NTTpq::Z;
 
-    using SchemeP = SchemeImpl<PolyP, kKeySwitchBase>;
-    using SchemeQ = SchemeImpl<PolyQ, kKeySwitchBase>;
-    using SchemePt = SchemeImpl<PolyPt, kKeySwitchBase>;
-    using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
-    using SchemePQ = SchemeImpl<PolyPQ, kKeySwitchBase>;
+    using SchemeP = SchemeImpl<NTTp, kKeySwitchBase>;
+    using SchemeQ = SchemeImpl<NTTq, kKeySwitchBase>;
+    using SchemePt = SchemeImpl<NTTpt, kKeySwitchBase>;
+    using SchemeQt = SchemeImpl<NTTqt, kKeySwitchBase>;
+    using SchemePQ = SchemeImpl<NTTpq, kKeySwitchBase>;
 
     static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
     static constexpr uint64_t kAccumulatorInputModulus = kTensorDimension;

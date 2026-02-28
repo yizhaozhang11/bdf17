@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "params.hpp"
@@ -63,6 +64,23 @@ typename Params::PolyPQ ConstructLutPoly(const std::vector<size_t> &samples) {
 }
 
 template <typename Params = DefaultParams>
+typename Params::SchemePt::Eval TracePQtoP(const typename Params::SchemePQ::Eval &a) {
+    using EvalP = typename Params::SchemePt::Eval;
+    using EvalQ = typename Params::SchemeQt::Eval;
+    using Z = typename Params::Z;
+
+    const uint64_t z = Z::Pow(EvalQ::N, Z::p - 2);
+    EvalP b;
+    for (size_t i = 0; i < EvalP::N; ++i) {
+        for (size_t j = 0; j < EvalQ::N; ++j) {
+            b[i] = Z::Add(b[i], a[i * EvalQ::N + j]);
+        }
+        b[i] = Z::Mul(b[i], z);
+    }
+    return b;
+}
+
+template <typename Params = DefaultParams>
 typename Params::PolyPt TracePQtoP(const typename Params::PolyPQ &a) {
     using PolyPt = typename Params::PolyPt;
     using PolyQt = typename Params::PolyQt;
@@ -85,6 +103,17 @@ typename Params::PolyPt TracePQtoP(const typename Params::PolyPQ &a) {
         b.a[i] = Z::Mul(b.a[i], z);
     }
     return b;
+}
+
+template <typename Params = DefaultParams>
+uint64_t TracePtoZ(const typename Params::SchemePt::Eval &a) {
+    using Z = typename Params::Z;
+
+    uint64_t z = 0;
+    for (size_t i = 0; i < Params::SchemePt::Eval::N; ++i) {
+        z = Z::Add(z, a[i]);
+    }
+    return Z::Mul(z, Z::Pow(Params::SchemePt::Eval::N, Z::p - 2));
 }
 
 template <typename PolyT>
@@ -112,24 +141,31 @@ template <typename Params = DefaultParams>
 typename Params::SchemePt::RLWECiphertext ApplyLutAndTrace(
     typename Params::SchemePQ::RLWECiphertext tensor_ct,
     const typename Params::PolyPQ &lut_poly_ntt) {
-    tensor_ct[0] = lut_poly_ntt * tensor_ct[0];
-    tensor_ct[1] = lut_poly_ntt * tensor_ct[1];
+    typename Params::SchemePQ::Eval lut_eval;
+    for (size_t i = 0; i < Params::SchemePQ::Eval::N; ++i) {
+        lut_eval[i] = lut_poly_ntt.a[i];
+    }
+
+    tensor_ct[0] = lut_eval * tensor_ct[0];
+    tensor_ct[1] = lut_eval * tensor_ct[1];
 
     return {TracePQtoP<Params>(tensor_ct[0]), TracePQtoP<Params>(tensor_ct[1])};
 }
 
 template <typename Params = DefaultParams>
 ExtractedLweSample<Params> ExtractLwe(typename Params::SchemePt::RLWECiphertext ct_trace) {
-    using PolyP = typename Params::PolyP;
+    using SchemePt = typename Params::SchemePt;
+    using EvalP = typename SchemePt::Eval;
 
     ExtractedLweSample<Params> out;
     out.a.resize(Params::kLweFrontendDimension);
-    out.b = TracePtoZ(ct_trace[1]);
+    out.b = TracePtoZ<Params>(ct_trace[1]);
 
-    ct_trace[0].ToCoeff();
-    out.a[0] = ct_trace[0].a[0];
+    typename SchemePt::Plan plan_p;
+    auto a_coeff = plan_p.inverse(ct_trace[0]);
+    out.a[0] = a_coeff[0];
     for (size_t i = 1; i < Params::kLweFrontendDimension; ++i) {
-        out.a[i] = ct_trace[0].a[PolyP::N - i];
+        out.a[i] = a_coeff[EvalP::N - i];
     }
     return out;
 }

@@ -31,6 +31,7 @@ public:
     static constexpr size_t O = Transform::O;
     static constexpr size_t N = Transform::N;
 
+    using TransformType = Transform;
     using Z = Zp<p>;
     using Domain = DomainTag;
 

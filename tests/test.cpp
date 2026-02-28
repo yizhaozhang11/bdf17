@@ -577,24 +577,23 @@ TEST(PolyOps, SignedFromCoeffNormalizesNegativeMultiplesOfModulus) {
 }
 
 TEST(RLWESampling, EncryptSamplesZeroSumA) {
-    using PolyToy = Poly<CircToyP>;
-    using SchemeToy = SchemeImpl<PolyToy, 16>;
+    using SchemeToy = SchemeImpl<CircToyP, 16>;
 
-    std::vector<int64_t> sk(PolyToy::N, 0);
+    std::vector<int64_t> sk(CircToyP::N, 0);
     sk[1] = 1;
     SchemeToy scheme(sk);
 
-    PolyToy m(true);
-    m.ToNTT();
+    SchemeToy::Coeff m_coeff;
+    SchemeToy::Plan plan;
+    auto m = plan.forward(m_coeff);
 
     for (size_t iter = 0; iter < 10; ++iter) {
         auto ct = scheme.RLWEEncrypt(m, scheme.sk, 8);
-        auto a = ct[0];
-        a.ToCoeff();
+        auto a_coeff = plan.inverse(ct[0]);
 
         uint64_t sum = 0;
-        for (size_t i = 0; i < PolyToy::N; ++i) {
-            sum = (sum + a.a[i]) % PolyToy::p;
+        for (size_t i = 0; i < CircToyP::N; ++i) {
+            sum = (sum + a_coeff[i]) % CircToyP::p;
         }
         EXPECT_EQ(sum, 0ULL);
     }

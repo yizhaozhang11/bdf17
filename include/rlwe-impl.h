@@ -1,274 +1,322 @@
 #ifndef RLWE_IMPL_H
 #define RLWE_IMPL_H
 
-template <typename Poly, uint64_t B>
-SchemeImpl<Poly, B>::SchemeImpl() : sk(), skp(), engine(std::random_device{}()), distribution(0, Q - 1) {}
+template <class Transform, uint64_t B, class Plan>
+SchemeImpl<Transform, B, Plan>::SchemeImpl()
+    : sk(), skp(), engine(std::random_device{}()), distribution(0, Q - 1), plan_() {}
 
-template <typename Poly, uint64_t B>
-SchemeImpl<Poly, B>::SchemeImpl(std::vector<int64_t> skVec) : sk(1), skp(true), engine(std::random_device{}()), distribution(0, Q - 1) {
-    skp = Poly::FromCoeff(skVec);
-    skp.ToNTT();
+template <class Transform, uint64_t B, class Plan>
+SchemeImpl<Transform, B, Plan>::SchemeImpl(std::vector<int64_t> skVec)
+    : sk(1), skp(), engine(std::random_device{}()), distribution(0, Q - 1), plan_() {
+    Coeff sk_coeff = Coeff::template FromSigned<int64_t>(skVec);
+    skp = plan_.forward(sk_coeff);
     sk[0] = skp;
 }
 
-template <typename Poly, uint64_t B>
-void SchemeImpl<Poly, B>::GaloisKeyGen() {
-    ksk_galois.resize(Poly::O);
-    skp.ToNTT();
-    for (size_t a = 2; a < Poly::O; a++) {
+template <class Transform, uint64_t B, class Plan>
+void SchemeImpl<Transform, B, Plan>::GaloisKeyGen() {
+    ksk_galois.resize(Eval::O);
+    for (size_t a = 2; a < Eval::O; a++) {
         auto sk_a = GaloisConjugate(sk, a);
         auto ksk = KeySwitchGen(sk_a, sk);
-        ksk_galois[a] = ksk;
+        ksk_galois[a] = std::move(ksk);
     }
 }
 
-template <typename Poly, uint64_t B>
+template <class Transform, uint64_t B, class Plan>
 template <typename T>
-std::vector<T> SchemeImpl<Poly, B>::GaloisConjugate(const std::vector<T> &x, const size_t &a) {
+std::vector<T> SchemeImpl<Transform, B, Plan>::GaloisConjugate(const std::vector<T> &x, const size_t &a) {
     std::vector<T> ret;
     ret.reserve(x.size());
     for (const auto &elem : x) {
-        ret.push_back(Poly::GaloisConjugate(elem, a));
+        ret.push_back(GaloisConjugate(elem, a));
     }
     return ret;
 }
 
-template <typename Poly, uint64_t B>
+template <class Transform, uint64_t B, class Plan>
 template <typename T1, typename T2>
-std::pair<T1, T2> SchemeImpl<Poly, B>::GaloisConjugate(const std::pair<T1, T2> &x, const size_t &a) {
-    return {Poly::GaloisConjugate(x.first, a), Poly::GaloisConjugate(x.second, a)};
+std::pair<T1, T2> SchemeImpl<Transform, B, Plan>::GaloisConjugate(const std::pair<T1, T2> &x, const size_t &a) {
+    return {GaloisConjugate(x.first, a), GaloisConjugate(x.second, a)};
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::RLWEEncrypt(const Poly &m, const RLWEKey &sk, uint64_t q_plain) {
-    size_t k = sk.size();
-    RLWECiphertext ct;
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::Eval SchemeImpl<Transform, B, Plan>::GaloisConjugate(const Eval &x, const size_t &a) {
+    return GaloisApply(x, a);
+}
 
-    Poly result(false);
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::Coeff SchemeImpl<Transform, B, Plan>::GaloisConjugate(const Coeff &x, const size_t &a) {
+    return GaloisApply(x, a);
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::RLWEEncrypt(
+    const Eval &m,
+    const RLWEKey &sk,
+    uint64_t q_plain) {
+    const size_t k = sk.size();
+    RLWECiphertext ct;
+    ct.reserve(k + 1);
+
+    Eval result;
     for (size_t i = 0; i < k; i++) {
         // BDF17-style CLWE sampling: choose a in the sum-zero subspace.
-        Poly a(true);
+        Coeff a_coeff;
         uint64_t sum = 0;
-        for (size_t j = 1; j < Poly::N; j++) {
-            a.a[j] = distribution(engine);
-            sum = Poly::Z::Add(sum, a.a[j]);
+        for (size_t j = 1; j < Eval::N; j++) {
+            a_coeff[j] = distribution(engine);
+            sum = Coeff::Z::Add(sum, a_coeff[j]);
         }
-        a.a[0] = Poly::Z::Sub(0, sum);
-        a.ToNTT();
-        result = result + a * sk[i];
-        ct.push_back(a);
+        a_coeff[0] = Coeff::Z::Sub(0, sum);
+
+        Eval a_eval = plan_.forward(a_coeff);
+        result = result + a_eval * sk[i];
+        ct.push_back(a_eval);
     }
-    auto rand = GaussianSampler<Poly::N>::GetInstance().SampleE(4.0);
-    Poly e = Poly::FromCoeff(rand);
-    e.ToNTT();
-    ct.push_back(result + e + m * (Q / q_plain));
+
+    const auto rand = GaussianSampler<Eval::N>::GetInstance().SampleE(4.0);
+    Coeff e_coeff = Coeff::template FromSigned<int64_t>(rand);
+    Eval e_eval = plan_.forward(e_coeff);
+
+    ct.push_back(result + e_eval + m * (Q / q_plain));
     return ct;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWEGadgetCiphertext SchemeImpl<Poly, B>::RLWEGadgetEncrypt(const Poly &m, const RLWEKey &sk, uint64_t q_plain) {
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWEGadgetCiphertext SchemeImpl<Transform, B, Plan>::RLWEGadgetEncrypt(
+    const Eval &m,
+    const RLWEKey &sk,
+    uint64_t q_plain) {
     RLWEGadgetCiphertext ct(G);
-
     for (size_t i = 0; i < G; i++) {
         ct[i] = RLWEEncrypt(m * gadget[i], sk, q_plain);
     }
     return ct;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RGSWCiphertext SchemeImpl<Poly, B>::RGSWEncrypt(const Poly &m, const typename SchemeImpl<Poly, B>::RLWEKey &sk) {
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext SchemeImpl<Transform, B, Plan>::RGSWEncrypt(const Eval &m, const RLWEKey &sk) {
     if (sk.size() != 1) {
         throw std::runtime_error("RGSW encryption requires a secret key of size 1");
     }
-    Poly s = sk[0];
+    const Eval s = sk[0];
     return std::make_pair(RLWEGadgetEncrypt(m * s, sk, Q), RLWEGadgetEncrypt(m, sk, Q));
 }
 
-template <typename Poly, uint64_t B>
-Poly SchemeImpl<Poly, B>::RLWEDecrypt(const RLWECiphertext &ct, const RLWEKey &sk, uint64_t q_plain) {
-    size_t k = sk.size();
-    Poly result = ct[k];
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::Coeff SchemeImpl<Transform, B, Plan>::RLWEDecrypt(
+    const RLWECiphertext &ct,
+    const RLWEKey &sk,
+    uint64_t q_plain) const {
+    const size_t k = sk.size();
+    Eval result = ct[k];
     for (size_t i = 0; i < k; i++) {
         result = result - ct[i] * sk[i];
     }
-    result.ToCoeff();
-    ModSwitch(result, q_plain);
-    return result;
+    Coeff coeff = plan_.inverse(result);
+    ModSwitch(coeff, q_plain);
+    return coeff;
 }
 
-template <typename Poly, uint64_t B>
-void SchemeImpl<Poly, B>::ModSwitch(Poly &x, uint64_t q) {
-    size_t n = Poly::N;
-    __uint128_t Q = Poly::p;
-    __uint128_t halfQ = Q / 2;
-    __uint128_t qq = q;
+template <class Transform, uint64_t B, class Plan>
+void SchemeImpl<Transform, B, Plan>::ModSwitch(Coeff &x, uint64_t q) {
+    const size_t n = Eval::N;
+    const __uint128_t big_q = Eval::p;
+    const __uint128_t half_q = big_q / 2;
+    const __uint128_t qq = q;
     for (size_t i = 0; i < n; ++i) {
-        __uint128_t xi = x.a[i];
-        xi = (xi * qq + halfQ) / Q;
+        __uint128_t xi = x[i];
+        xi = (xi * qq + half_q) / big_q;
         if (xi >= qq) {
             xi -= qq;
         }
-        x.a[i] = (uint64_t)xi;
+        x[i] = static_cast<uint64_t>(xi);
     }
 }
 
-template <typename Poly, uint64_t B> template <typename S>
-typename S::RLWECiphertext SchemeImpl<Poly, B>::ModSwitch(const RLWECiphertext &ct) {
-    auto q = S::Q;
+template <class Transform, uint64_t B, class Plan>
+template <typename S>
+typename S::RLWECiphertext SchemeImpl<Transform, B, Plan>::ModSwitch(const RLWECiphertext &ct) {
+    static_assert(S::Coeff::N == Coeff::N, "Cross-scheme ModSwitch requires equal ring degree");
+
+    Plan source_plan;
+    typename S::Plan target_plan;
+
     typename S::RLWECiphertext result;
-    for (auto elem : ct) {
-        elem.ToCoeff();
-        ModSwitch(elem, q);
-        typename S::Poly tmp;
-        for (size_t i = 0; i < S::Poly::N; i++) {
-            tmp.a[i] = elem.a[i];
+    result.reserve(ct.size());
+    for (const auto &elem : ct) {
+        Coeff coeff = source_plan.inverse(elem);
+        ModSwitch(coeff, S::Q);
+
+        typename S::Coeff coeff_switched;
+        for (size_t i = 0; i < S::Coeff::N; ++i) {
+            coeff_switched[i] = coeff[i];
         }
-        tmp.ToNTT();
-        result.push_back(tmp);
+        result.push_back(target_plan.forward(coeff_switched));
     }
     return result;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWESwitchingKey SchemeImpl<Poly, B>::KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN) {
+template <class Transform, uint64_t B, class Plan>
+std::array<typename SchemeImpl<Transform, B, Plan>::Coeff, SchemeImpl<Transform, B, Plan>::G>
+SchemeImpl<Transform, B, Plan>::BaseDecompose(const Coeff &a) {
+    std::array<Coeff, G> out;
+    for (size_t j = 0; j < G; ++j) {
+        const uint64_t t = gadget[j];
+        for (size_t l = 0; l < Eval::N; ++l) {
+            out[j][l] = (a[l] / t) % B;
+        }
+    }
+    return out;
+}
+
+template <class Transform, uint64_t B, class Plan>
+std::array<typename SchemeImpl<Transform, B, Plan>::Eval, SchemeImpl<Transform, B, Plan>::G>
+SchemeImpl<Transform, B, Plan>::BaseDecomposeToEval(const Eval &a, const Plan &plan) {
+    const Coeff coeff = plan.inverse(a);
+    const auto digits_coeff = BaseDecompose(coeff);
+
+    std::array<Eval, G> out;
+    for (size_t j = 0; j < G; ++j) {
+        out[j] = plan.forward(digits_coeff[j]);
+    }
+    return out;
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWESwitchingKey SchemeImpl<Transform, B, Plan>::KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN) {
     RLWESwitchingKey result;
+    result.reserve(sk.size());
     for (size_t i = 0; i < sk.size(); i++) {
         result.push_back(RLWEGadgetEncrypt(sk[i], skN, Q));
     }
     return result;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &K) {
-    size_t k = ct.size() - 1;
-    size_t kN = K[0][0].size() - 1;
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::KeySwitch(
+    const RLWECiphertext &ct,
+    const RLWESwitchingKey &k) {
+    const size_t dim_in = ct.size() - 1;
+    const size_t dim_out = k[0][0].size() - 1;
 
-    RLWECiphertext result(kN + 1);
-    for (size_t i = 0; i <= kN; i++) {
-        result[i].is_coeff = false;
-    }
-    result[kN] = ct[k];
+    RLWECiphertext result(dim_out + 1);
+    result[dim_out] = ct[dim_in];
 
-    for (size_t i = 0; i < k; i++) {
-        auto a = ct[i];
-        a.ToCoeff();
+    Plan plan;
+    for (size_t i = 0; i < dim_in; i++) {
+        const auto digits = BaseDecomposeToEval(ct[i], plan);
         for (size_t j = 0; j < G; j++) {
-            uint64_t t = gadget[j];
-            Poly a0(true);
-            for (size_t l = 0; l < Poly::N; l++) {
-                a0.a[l] = a.a[l] / t % B;
-            }
-            a0.ToNTT();
-            for (size_t l = 0; l <= kN; l++) {
-                result[l] = result[l] - a0 * K[i][j][l];
+            for (size_t l = 0; l <= dim_out; l++) {
+                result[l] = result[l] - digits[j] * k[i][j][l];
             }
         }
     }
     return result;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::Mult(Poly a, RLWEGadgetCiphertext ct) {
-    size_t kN = ct[0].size() - 1;
-    a.ToCoeff();
-    RLWECiphertext result;
-    for (size_t i = 0; i <= kN; i++) {
-        Poly c(false);
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::Mult(
+    Eval a,
+    const RLWEGadgetCiphertext &ct) {
+    const size_t dim_out = ct[0].size() - 1;
+
+    Plan plan;
+    const auto digits = BaseDecomposeToEval(a, plan);
+
+    RLWECiphertext result(dim_out + 1);
+    for (size_t i = 0; i <= dim_out; i++) {
+        Eval c;
         for (size_t j = 0; j < G; j++) {
-            uint64_t t = gadget[j];
-            Poly a0(true);
-            for (size_t l = 0; l < Poly::N; l++) {
-                a0.a[l] = a.a[l] / t % B;
-            }
-            a0.ToNTT();
-            c = c + a0 * ct[j][i];
+            c = c + digits[j] * ct[j][i];
         }
-        result.push_back(c);
+        result[i] = c;
     }
     return result;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::ExtMult(const RLWECiphertext &ct, const RGSWCiphertext &ctGSW) {
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::ExtMult(
+    const RLWECiphertext &ct,
+    const RGSWCiphertext &ctGSW) {
     if (ct.size() != 2) {
         throw std::runtime_error("RGSW multiplication requires a ciphertext of size 2");
     }
 
-    Poly ra(false);
-    Poly rb(false);
+    Eval ra;
+    Eval rb;
 
-    Poly a = ct[0];
-    Poly b = ct[1];
-
-    for (size_t i = 0; i < Poly::N; i++) {
-        a.a[i] = Poly::Z::Sub(0, a.a[i]);
+    Eval a = ct[0];
+    Eval b = ct[1];
+    for (size_t i = 0; i < Eval::N; i++) {
+        a[i] = Eval::Z::Sub(0, a[i]);
     }
 
-    a.ToCoeff();
-    b.ToCoeff();
+    Plan plan;
+    const auto a_digits = BaseDecomposeToEval(a, plan);
+    const auto b_digits = BaseDecomposeToEval(b, plan);
 
     for (size_t i = 0; i < G; i++) {
-        uint64_t t = gadget[i];
-        Poly a0(true);
-        Poly b0(true);
-        for (size_t l = 0; l < Poly::N; l++) {
-            a0.a[l] = a.a[l] / t % B;
-            b0.a[l] = b.a[l] / t % B;
-        }
-        a0.ToNTT();
-        b0.ToNTT();
-        ra = ra + b0 * ctGSW.second[i][0] + a0 * ctGSW.first[i][0];
-        rb = rb + b0 * ctGSW.second[i][1] + a0 * ctGSW.first[i][1];
+        ra = ra + b_digits[i] * ctGSW.second[i][0] + a_digits[i] * ctGSW.first[i][0];
+        rb = rb + b_digits[i] * ctGSW.second[i][1] + a_digits[i] * ctGSW.first[i][1];
     }
     return {ra, rb};
 }
 
-template <typename Poly, uint64_t B>
-std::vector<typename SchemeImpl<Poly, B>::RGSWCiphertext> SchemeImpl<Poly, B>::BootstrappingKeyGen(std::vector<int64_t> z) {
+template <class Transform, uint64_t B, class Plan>
+std::vector<typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext> SchemeImpl<Transform, B, Plan>::BootstrappingKeyGen(std::vector<int64_t> z) {
     std::vector<RGSWCiphertext> result;
+    result.reserve(z.size());
     for (size_t i = 0; i < z.size(); i++) {
-        Poly m(true);
-        m.a[(z[i] + Poly::O) % Poly::O] = 1;
-        m.ToNTT();
-        auto ct = RGSWEncrypt(m, sk);
-        result.push_back(ct);
+        int64_t idx = z[i] % static_cast<int64_t>(Eval::O);
+        if (idx < 0) {
+            idx += static_cast<int64_t>(Eval::O);
+        }
+        Coeff m_coeff = Coeff::Monomial(static_cast<size_t>(idx), 1);
+        Eval m_eval = plan_.forward(m_coeff);
+        result.push_back(RGSWEncrypt(m_eval, sk));
     }
     return result;
 }
 
-template <typename Poly, uint64_t B>
-typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::Process(const std::vector<RGSWCiphertext> &BK, std::vector<int64_t> a, int64_t b, uint64_t q_plain) {
-    Poly ca(false);
-    Poly cb(true);
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::Process(
+    const std::vector<RGSWCiphertext> &bk,
+    std::vector<int64_t> a,
+    int64_t b,
+    uint64_t q_plain) {
+    Eval ca;
+    Coeff cb_coeff;
 
     if (b < 0) {
         b = -b;
-        b = b % Poly::O;
-        b = Poly::O - b;
+        b = b % static_cast<int64_t>(Eval::O);
+        b = static_cast<int64_t>(Eval::O) - b;
     }
-    b = b % Poly::O;
-    cb.a[b] = Q / q_plain;
+    b = b % static_cast<int64_t>(Eval::O);
+    cb_coeff[static_cast<size_t>(b)] = Q / q_plain;
 
-    cb.ToNTT();
+    Eval cb = plan_.forward(cb_coeff);
     RLWECiphertext ct{ca, cb};
 
     uint64_t t = 1;
     for (size_t i = 0; i < a.size(); i++) {
         if (a[i] < 0) {
             a[i] = -a[i];
-            a[i] = a[i] % Poly::O;
-            a[i] = Poly::O - a[i];
+            a[i] = a[i] % static_cast<int64_t>(Eval::O);
+            a[i] = static_cast<int64_t>(Eval::O) - a[i];
         }
-        a[i] = a[i] % Poly::O;
-        a[i] = Poly::O - a[i];
-        if (a[i] != Poly::O) {
-            t = Zp<Poly::O>::Mul(t, Zp<Poly::O>::Pow(a[i], Poly::O - 2));
+        a[i] = a[i] % static_cast<int64_t>(Eval::O);
+        a[i] = static_cast<int64_t>(Eval::O) - a[i];
+        if (a[i] != static_cast<int64_t>(Eval::O)) {
+            t = Zp<Eval::O>::Mul(t, Zp<Eval::O>::Pow(static_cast<uint64_t>(a[i]), Eval::O - 2));
             if (t != 1) {
                 ct = GaloisConjugate(ct, t);
                 ct = KeySwitch(ct, ksk_galois[t]);
             }
-            ct = ExtMult(ct, BK[i]);
-            t = a[i];
+            ct = ExtMult(ct, bk[i]);
+            t = static_cast<uint64_t>(a[i]);
         }
     }
     if (t != 1) {

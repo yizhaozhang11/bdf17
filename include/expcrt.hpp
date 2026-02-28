@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "params.hpp"
+#include "typed_poly.hpp"
 
 namespace bdf17 {
 
@@ -39,46 +40,64 @@ Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const Pol
 }
 
 template <typename PolyPT, typename PolyQT>
-Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> GenKey(const std::vector<int64_t> &sk) {
-    PolyPT sk_p(true);
-    PolyQT one_q(false);
+void Tensor(
+    EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> &out,
+    const EvalPoly<PolyPT> &lhs,
+    const EvalPoly<PolyQT> &rhs) {
+    using TensorNTT = TensorNTTImpl<PolyPT, PolyQT>;
+    using Z = typename TensorNTT::Z;
 
-    for (size_t i = 0; i < sk.size(); ++i) {
-        sk_p.a[i] = sk[i] < 0 ? sk[i] + PolyPT::p : sk[i];
+    for (size_t i = 0; i < EvalPoly<PolyPT>::N; ++i) {
+        for (size_t j = 0; j < EvalPoly<PolyQT>::N; ++j) {
+            out[i * EvalPoly<PolyQT>::N + j] = Z::Mul(lhs[i], rhs[j]);
+        }
     }
-    for (size_t i = 0; i < PolyQT::N; ++i) {
-        one_q.a[i] = 1;
+}
+
+template <typename PolyPT, typename PolyQT>
+EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> Tensor(const EvalPoly<PolyPT> &lhs, const EvalPoly<PolyQT> &rhs) {
+    EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> out;
+    Tensor(out, lhs, rhs);
+    return out;
+}
+
+template <typename PolyPT, typename PolyQT>
+EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> GenKey(const std::vector<int64_t> &sk) {
+    auto sk_p_coeff = CoeffPoly<PolyPT>::template FromSigned<int64_t>(sk);
+    EvalPoly<PolyQT> one_q;
+    for (size_t i = 0; i < EvalPoly<PolyQT>::N; ++i) {
+        one_q[i] = 1;
     }
 
-    sk_p.ToNTT();
-    return Tensor(sk_p, one_q);
+    CanonicalNttPlan<PolyPT> plan_p;
+    return Tensor(plan_p.forward(sk_p_coeff), one_q);
 }
 
 template <typename Params = DefaultParams>
 typename Params::SchemePQ::RLWEKey TensorKey(const typename Params::SchemePt::RLWEKey &sk_p, const typename Params::SchemeQt::RLWEKey &sk_q) {
-    using PolyPt = typename Params::PolyPt;
-    using PolyQt = typename Params::PolyQt;
-    using PolyPQ = typename Params::PolyPQ;
     using SchemePQ = typename Params::SchemePQ;
+    using EvalPt = typename Params::SchemePt::Eval;
+    using EvalQt = typename Params::SchemeQt::Eval;
+    using EvalPQ = typename Params::SchemePQ::Eval;
     using Z = typename Params::Z;
 
     typename SchemePQ::RLWEKey sk_pq;
 
-    PolyPt skp0 = sk_p[0];
-    PolyQt skq0 = sk_q[0];
-    PolyPt p_one(false);
-    PolyQt q_one(false);
+    EvalPt skp0 = sk_p[0];
+    EvalQt skq0 = sk_q[0];
+    EvalPt p_one;
+    EvalQt q_one;
 
-    for (size_t i = 0; i < PolyPt::N; ++i) {
-        p_one.a[i] = 1;
+    for (size_t i = 0; i < EvalPt::N; ++i) {
+        p_one[i] = 1;
     }
-    for (size_t i = 0; i < PolyQt::N; ++i) {
-        q_one.a[i] = 1;
+    for (size_t i = 0; i < EvalQt::N; ++i) {
+        q_one[i] = 1;
     }
 
-    PolyPQ skpq0 = Tensor(skp0, skq0);
-    for (size_t i = 0; i < PolyPQ::N; ++i) {
-        skpq0.a[i] = Z::Sub(0, skpq0.a[i]);
+    EvalPQ skpq0 = Tensor(skp0, skq0);
+    for (size_t i = 0; i < EvalPQ::N; ++i) {
+        skpq0[i] = Z::Sub(0, skpq0[i]);
     }
 
     sk_pq.push_back(skpq0);
@@ -114,7 +133,7 @@ struct TensorExpCrtState {
         SchemeQt scheme_qt(sk_q);
 
         auto sk_pq = TensorKey<Params>(scheme_pt.sk, scheme_qt.sk);
-        typename SchemePQ::RLWEKey sk_p0{GenKey<typename Params::PolyPt, typename Params::PolyQt>(lwe_secret)};
+        typename SchemePQ::RLWEKey sk_p0{GenKey<typename SchemePt::Transform, typename SchemeQt::Transform>(lwe_secret)};
         tensor_bk = scheme_pq.KeySwitchGen(sk_pq, sk_p0);
     }
 };

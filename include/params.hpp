@@ -5,8 +5,10 @@
 #include <cstdint>
 
 #include "ntt.h"
+#include "ntt_plan.hpp"
 #include "poly.h"
 #include "rlwe.h"
+#include "typed_poly.hpp"
 
 namespace bdf17 {
 
@@ -36,6 +38,26 @@ struct DefaultParams {
 
     using NTTpq = TensorNTTImpl<NTTpt, NTTqt>;
 
+    // Typed-domain aliases used by migrated components.
+    using EvalP = EvalPoly<NTTp>;
+    using EvalQ = EvalPoly<NTTq>;
+    using EvalPt = EvalPoly<NTTpt>;
+    using EvalQt = EvalPoly<NTTqt>;
+    using EvalPQ = EvalPoly<NTTpq>;
+
+    using CoeffP = CoeffPoly<NTTp>;
+    using CoeffQ = CoeffPoly<NTTq>;
+    using CoeffPt = CoeffPoly<NTTpt>;
+    using CoeffQt = CoeffPoly<NTTqt>;
+    using CoeffPQ = CoeffPoly<NTTpq>;
+
+    using PlanP = CanonicalNttPlan<NTTp>;
+    using PlanQ = CanonicalNttPlan<NTTq>;
+    using PlanPt = CanonicalNttPlan<NTTpt>;
+    using PlanQt = CanonicalNttPlan<NTTqt>;
+    using PlanPQ = CanonicalNttPlan<NTTpq>;
+
+    // Legacy aliases (kept during migration for non-RLWE components).
     using PolyP = Poly<NTTp>;
     using PolyQ = Poly<NTTq>;
     using PolyPt = Poly<NTTpt>;
@@ -44,11 +66,11 @@ struct DefaultParams {
 
     using Z = NTTpq::Z;
 
-    using SchemeP = SchemeImpl<PolyP, kKeySwitchBase>;
-    using SchemeQ = SchemeImpl<PolyQ, kKeySwitchBase>;
-    using SchemePQ = SchemeImpl<PolyPQ, kKeySwitchBase>;
-    using SchemePt = SchemeImpl<PolyPt, kKeySwitchBase>;
-    using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
+    using SchemeP = SchemeImpl<NTTp, kKeySwitchBase, PlanP>;
+    using SchemeQ = SchemeImpl<NTTq, kKeySwitchBase, PlanQ>;
+    using SchemePQ = SchemeImpl<NTTpq, kKeySwitchBase, PlanPQ>;
+    using SchemePt = SchemeImpl<NTTpt, kKeySwitchBase, PlanPt>;
+    using SchemeQt = SchemeImpl<NTTqt, kKeySwitchBase, PlanQt>;
 
     static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
     static constexpr uint64_t kAccumulatorInputModulus = kTensorDimension;

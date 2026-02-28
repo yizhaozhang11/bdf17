@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -59,13 +60,35 @@ using bdf17::equiv_ref::kQ;
 constexpr size_t kRandomCases = 16;
 
 template <typename PolyT>
-std::vector<uint64_t> ToCoeffVector(PolyT poly) {
+std::vector<uint64_t> ToCoeffVector(PolyT poly)
+requires requires { poly.is_coeff; poly.a[0]; }
+{
     poly.ToCoeff();
     std::vector<uint64_t> out(PolyT::N, 0);
     for (size_t i = 0; i < PolyT::N; ++i) {
         out[i] = poly.a[i];
     }
     return out;
+}
+
+template <typename PolyT>
+std::vector<uint64_t> ToCoeffVector(const PolyT &poly)
+requires requires { typename PolyT::Domain; typename PolyT::TransformType; }
+{
+    std::vector<uint64_t> out(PolyT::N, 0);
+    if constexpr (std::is_same_v<typename PolyT::Domain, CoeffTag>) {
+        for (size_t i = 0; i < PolyT::N; ++i) {
+            out[i] = poly[i];
+        }
+        return out;
+    } else {
+        CanonicalNttPlan<typename PolyT::TransformType> plan;
+        auto coeff = plan.inverse(poly);
+        for (size_t i = 0; i < PolyT::N; ++i) {
+            out[i] = coeff[i];
+        }
+        return out;
+    }
 }
 
 std::vector<uint64_t> RandomCoeffVector(size_t n, uint64_t seed) {
@@ -148,14 +171,13 @@ CurrentExpCrtPhaseResult CurrentExpCrtPhaseNoiselessRef(
     const RlweCiphertextRef &cq,
     const std::vector<uint64_t> &sp,
     const std::vector<uint64_t> &sq) {
-    auto p_a = ToyEqParams::PolyPt::FromCoeff(cp.a);
-    auto p_b = ToyEqParams::PolyPt::FromCoeff(cp.b);
-    auto q_a = ToyEqParams::PolyQt::FromCoeff(cq.a);
-    auto q_b = ToyEqParams::PolyQt::FromCoeff(cq.b);
-    p_a.ToNTT();
-    p_b.ToNTT();
-    q_a.ToNTT();
-    q_b.ToNTT();
+    typename ToyEqParams::SchemePt::Plan plan_p;
+    typename ToyEqParams::SchemeQt::Plan plan_q;
+
+    auto p_a = plan_p.forward(ToyEqParams::SchemePt::Coeff::FromUnsigned(cp.a));
+    auto p_b = plan_p.forward(ToyEqParams::SchemePt::Coeff::FromUnsigned(cp.b));
+    auto q_a = plan_q.forward(ToyEqParams::SchemeQt::Coeff::FromUnsigned(cq.a));
+    auto q_b = plan_q.forward(ToyEqParams::SchemeQt::Coeff::FromUnsigned(cq.b));
 
     typename ToyEqParams::SchemePt::RLWECiphertext ct_p{p_a, p_b};
     typename ToyEqParams::SchemeQt::RLWECiphertext ct_q{q_a, q_b};

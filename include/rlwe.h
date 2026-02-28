@@ -1,11 +1,16 @@
 #ifndef RLWE_H
 #define RLWE_H
 
-#include <vector>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <random>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
-#include "poly.h"
+#include "ntt_plan.hpp"
+#include "typed_poly.hpp"
 
 template <size_t l>
 class GaussianSampler {
@@ -44,6 +49,7 @@ public:
         }
         return a;
     }
+
 private:
     std::mt19937 engine;
     std::uniform_int_distribution<int64_t> distribution;
@@ -51,39 +57,44 @@ private:
     GaussianSampler() : engine(std::random_device{}()), distribution(0, l - 1) {}
 };
 
-template <typename Poly_, uint64_t B>
+template <class Transform_, uint64_t B, class Plan_ = CanonicalNttPlan<Transform_>>
 class SchemeImpl {
 public:
-    using Poly = Poly_;
+    using Transform = Transform_;
+    using Plan = Plan_;
 
-    using RLWEKey = std::vector<Poly>;
-    using RLWECiphertext = std::vector<Poly>;
+    using Coeff = CoeffPoly<Transform>;
+    using Eval = EvalPoly<Transform>;
+    using Poly = Eval; // Transitional alias while non-RLWE code is migrated.
+
+    using RLWEKey = std::vector<Eval>;
+    using RLWECiphertext = std::vector<Eval>;
     using RLWEGadgetCiphertext = std::vector<RLWECiphertext>;
     using RLWESwitchingKey = std::vector<RLWEGadgetCiphertext>;
     using RGSWCiphertext = std::pair<RLWEGadgetCiphertext, RLWEGadgetCiphertext>;
 
-    constexpr static uint64_t Q = Poly::p;
+    constexpr static uint64_t Q = Eval::p;
 
     constexpr static size_t G = []() {
-        size_t G = 0;
+        size_t g = 0;
         for (__uint128_t t = 1; t <= Q; t *= B) {
-            G++;
+            g++;
         }
-        return G;
+        return g;
     }();
 
     constexpr static auto gadget = []() {
-        std::array<uint64_t, G> gadget;
+        std::array<uint64_t, G> g{};
         uint64_t t = 1;
         for (size_t i = 0; i < G; i++) {
-            gadget[i] = t;
+            g[i] = t;
             t *= B;
         }
-        return gadget;
+        return g;
     }();
 
     RLWEKey sk;
-    Poly skp;
+    Eval skp;
 
     std::vector<RLWESwitchingKey> ksk_galois;
 
@@ -91,8 +102,7 @@ public:
     std::uniform_int_distribution<uint64_t> distribution;
 
     SchemeImpl();
-
-    SchemeImpl(std::vector<int64_t> skVec);
+    explicit SchemeImpl(std::vector<int64_t> skVec);
 
     void GaloisKeyGen();
 
@@ -102,24 +112,33 @@ public:
     template <typename T1, typename T2>
     static std::pair<T1, T2> GaloisConjugate(const std::pair<T1, T2> &x, const size_t &a);
 
-    static void ModSwitch(Poly &x, uint64_t q);
+    static Eval GaloisConjugate(const Eval &x, const size_t &a);
+    static Coeff GaloisConjugate(const Coeff &x, const size_t &a);
+
+    static void ModSwitch(Coeff &x, uint64_t q);
 
     template <typename S>
     static typename S::RLWECiphertext ModSwitch(const RLWECiphertext &ct);
 
-    RLWECiphertext RLWEEncrypt(const Poly &m, const RLWEKey &sk, uint64_t q_plain);
-    RLWEGadgetCiphertext RLWEGadgetEncrypt(const Poly &m, const RLWEKey &sk, uint64_t q_plain);
-    RGSWCiphertext RGSWEncrypt(const Poly &m, const RLWEKey &sk);
-    static Poly RLWEDecrypt(const RLWECiphertext &ct, const RLWEKey &sk, uint64_t q_plain);
+    RLWECiphertext RLWEEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain);
+    RLWEGadgetCiphertext RLWEGadgetEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain);
+    RGSWCiphertext RGSWEncrypt(const Eval &m, const RLWEKey &sk);
+    Coeff RLWEDecrypt(const RLWECiphertext &ct, const RLWEKey &sk, uint64_t q_plain) const;
 
-    static RLWECiphertext Mult(Poly a, RLWEGadgetCiphertext ct);
+    static RLWECiphertext Mult(Eval a, const RLWEGadgetCiphertext &ct);
     static RLWECiphertext ExtMult(const RLWECiphertext &ct, const RGSWCiphertext &ctGSW);
 
     RLWESwitchingKey KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN);
-    static RLWECiphertext KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &K);
+    static RLWECiphertext KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &k);
 
     std::vector<RGSWCiphertext> BootstrappingKeyGen(std::vector<int64_t> z);
-    RLWECiphertext Process(const std::vector<RGSWCiphertext> &BK, std::vector<int64_t> a, int64_t b, uint64_t q_plain);
+    RLWECiphertext Process(const std::vector<RGSWCiphertext> &bk, std::vector<int64_t> a, int64_t b, uint64_t q_plain);
+
+private:
+    static std::array<Coeff, G> BaseDecompose(const Coeff &a);
+    static std::array<Eval, G> BaseDecomposeToEval(const Eval &a, const Plan &plan);
+
+    Plan plan_;
 };
 
 #include "rlwe-impl.h"
