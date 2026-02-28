@@ -1,6 +1,8 @@
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <random>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +16,46 @@ using PrimitiveToy = NTT<1093ULL, 5ULL, 13, 2>;
 using CircToyP = CircNTT<1093ULL, 5ULL, 7, 3>;
 using CircToyQ = CircNTT<1093ULL, 5ULL, 13, 2>;
 using TensorToy = TensorNTTImpl<CircToyP, CircToyQ>;
+
+// Edge/corner cases across mixed-radix exponents in N = 2^u * 3^v (where N = O - 1).
+using PrimitiveUV00 = NTT<72057421557668737ULL, 5ULL, 2, 1>;         // (u, v) = (0, 0), metadata-only
+using CircUV10 = CircNTT<72057421557668737ULL, 5ULL, 3, 2>;          // (u, v) = (1, 0)
+using CircUV11 = CircNTT<72057421557668737ULL, 5ULL, 7, 3>;          // (u, v) = (1, 1)
+using CircUV1mP = CircNTT<2053ULL, 2ULL, 19, 2>;                      // (u, v) = (1, 2)
+using CircUVn0Q = CircNTT<1361ULL, 3ULL, 17, 3>;                      // (u, v) = (4, 0)
+using CircUV1mQ = CircNTT<26407ULL, 5ULL, 163, 2>;                    // (u, v) = (1, 4)
+using CircUVnmP = CircNTT<3984769ULL, 17ULL, 1153, 5>;                // (u, v) = (7, 2)
+using CircUVnmQ = CircNTT<10085473ULL, 5ULL, 1297, 10>;               // (u, v) = (4, 4)
+
+template <typename Transform>
+void ExpectRoundTrip(uint64_t seed);
+
+template <typename Transform>
+void ExpectLinearity(uint64_t seed_lhs, uint64_t seed_rhs);
+
+bool ExtendedNttSuiteEnabled() {
+    const char *flag = std::getenv("BDF17_ENABLE_EXTENDED_NTT_TESTS");
+    if (flag == nullptr) {
+        return false;
+    }
+    std::string_view value(flag);
+    return value == "1" || value == "true" || value == "on";
+}
+
+template <typename CircTransform, size_t ExpectedU, size_t ExpectedV>
+void ExpectUvCase(uint64_t seed_base) {
+    using Primitive = typename CircTransform::PrimitiveNTT;
+    static_assert(Primitive::u == ExpectedU);
+    static_assert(Primitive::v == ExpectedV);
+
+    EXPECT_EQ(Primitive::u, ExpectedU);
+    EXPECT_EQ(Primitive::v, ExpectedV);
+
+    ExpectRoundTrip<Primitive>(seed_base + 0);
+    ExpectRoundTrip<CircTransform>(seed_base + 1);
+    ExpectLinearity<Primitive>(seed_base + 2, seed_base + 3);
+    ExpectLinearity<CircTransform>(seed_base + 4, seed_base + 5);
+}
 
 uint64_t MulMod(uint64_t lhs, uint64_t rhs, uint64_t mod) {
     return (uint64_t)((__uint128_t)lhs * rhs % mod);
@@ -270,4 +312,45 @@ TEST(TensorNTT, MatchesNaiveSeparableForward) {
     Forward<TensorToy>(opt.data());
     auto naive = NaiveForwardTensor<TensorToy>(input);
     EXPECT_EQ(opt, naive);
+}
+
+TEST(NTTMatrix, EdgeExponentDegenerateMetadataOnly) {
+    // N = 1 (u=0, v=0) is representable in metadata, but the current kernel fast path
+    // is implemented for N >= 2 and is therefore not executed here.
+    EXPECT_EQ(PrimitiveUV00::u, 0);
+    EXPECT_EQ(PrimitiveUV00::v, 0);
+    EXPECT_EQ(PrimitiveUV00::N, 1);
+}
+
+TEST(NTTMatrix, EdgeExponentFastCases) {
+    // Covers realizable pairs from:
+    // - n = 7, m = 2: (0,0 metadata-only), (1,0), (1,1), (1,2)
+    // - n = 4, m = 4: (4,0), (1,4)
+    // Note: the current mixed-radix kernel requires N >= 2 for execution.
+    ExpectUvCase<CircUV10, 1, 0>(200);
+    ExpectUvCase<CircUV11, 1, 1>(300);
+    ExpectUvCase<CircUV1mP, 1, 2>(400);
+    ExpectUvCase<CircUVn0Q, 4, 0>(500);
+    ExpectUvCase<CircUV1mQ, 1, 4>(600);
+
+    ExpectCircularConvolutionViaNTT<CircUV10>(700, 701);
+    ExpectCircularConvolutionViaNTT<CircUV11>(702, 703);
+    ExpectCircularConvolutionViaNTT<CircUV1mP>(704, 705);
+    ExpectCircularConvolutionViaNTT<CircUVn0Q>(706, 707);
+    ExpectCircularConvolutionViaNTT<CircUV1mQ>(708, 709);
+}
+
+TEST(NTTMatrix, EdgeExponentLargeCasesOptional) {
+    if (!ExtendedNttSuiteEnabled()) {
+        GTEST_SKIP() << "Set BDF17_ENABLE_EXTENDED_NTT_TESTS=1 to run large matrix edge cases.";
+    }
+
+    // Largest edge pairs:
+    // - n = 7, m = 2: (7,2)
+    // - n = 4, m = 4: (4,4)
+    ExpectUvCase<CircUVnmP, 7, 2>(800);
+    ExpectUvCase<CircUVnmQ, 4, 4>(900);
+
+    ExpectCircularConvolutionViaNTT<CircUVnmP>(1000, 1001);
+    ExpectCircularConvolutionViaNTT<CircUVnmQ>(1002, 1003);
 }

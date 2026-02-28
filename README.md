@@ -332,6 +332,12 @@ Run tests:
 ctest --test-dir build
 ```
 
+Run extended NTT edge-case matrix tests (includes large `2^u*3^v` cases):
+
+```bash
+BDF17_ENABLE_EXTENDED_NTT_TESTS=1 ctest --test-dir build -R NTTMatrix
+```
+
 ---
 
 ## 8. Known engineering hazards / gotchas (important for contributors)
