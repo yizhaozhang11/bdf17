@@ -12,13 +12,19 @@ namespace bdf17 {
 
 struct DefaultParams {
     // n, t, B
-    static constexpr size_t kLweDimension = 600;
+    static constexpr size_t kLweInputDimension = 600;
+    static constexpr size_t kLweOutputDimension = 600;
     static constexpr uint64_t kPlainModulus = 64;
     static constexpr uint64_t kKeySwitchBase = 1ULL << 8;
+    static constexpr uint64_t kLweKeySwitchBase = kKeySwitchBase;
+    static constexpr bool kEnableLweDimReduction = false;
+    static constexpr double kLweNoiseVar = 4.0;
 
     static constexpr size_t kNumTrials = 8;
     static constexpr double kLweSecretDensity = 0.33;
     static constexpr double kAccumulatorSecretDensity = 0.3;
+
+    static_assert(kPlainModulus > 0 && (kPlainModulus & (kPlainModulus - 1)) == 0, "kPlainModulus must be a power of two");
 
     // Accumulator rings
     using NTTp = CircNTT<72057421557668737LL, 5LL, 1153, 5>;
@@ -45,6 +51,8 @@ struct DefaultParams {
     using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
 
     static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
+
+    static_assert(kLweInputDimension <= PolyP::N, "kLweInputDimension must not exceed PolyP::N");
 };
 
 } // namespace bdf17

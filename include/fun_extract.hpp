@@ -123,12 +123,12 @@ ExtractedLweSample<Params> ExtractLwe(typename Params::SchemePt::RLWECiphertext 
     using PolyP = typename Params::PolyP;
 
     ExtractedLweSample<Params> out;
-    out.a.resize(Params::kLweDimension);
+    out.a.resize(Params::kLweInputDimension);
     out.b = TracePtoZ(ct_trace[1]);
 
     ct_trace[0].ToCoeff();
     out.a[0] = ct_trace[0].a[0];
-    for (size_t i = 1; i < Params::kLweDimension; ++i) {
+    for (size_t i = 1; i < Params::kLweInputDimension; ++i) {
         out.a[i] = ct_trace[0].a[PolyP::N - i];
     }
     return out;

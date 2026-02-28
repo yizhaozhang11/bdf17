@@ -2,6 +2,7 @@
 #define BDF17_ACCUMULATOR_HPP
 
 #include <cstdint>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,9 @@ struct AccumulatorState {
           sk_q(GaussianSampler<PolyQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
           scheme_p(sk_p),
           scheme_q(sk_q) {
+        if (lwe_secret.size() != Params::kLweInputDimension) {
+            throw std::runtime_error("lwe_secret size mismatch");
+        }
         scheme_p.GaloisKeyGen();
         scheme_q.GaloisKeyGen();
         bk_p = scheme_p.BootstrappingKeyGen(lwe_secret);
@@ -47,6 +51,10 @@ AccumulatorOutput<Params> ExtExpInner(AccumulatorState<Params> &state, const std
     using SchemeQ = typename Params::SchemeQ;
     using SchemePt = typename Params::SchemePt;
     using SchemeQt = typename Params::SchemeQt;
+
+    if (a.size() != Params::kLweInputDimension) {
+        throw std::runtime_error("LWE input dimension mismatch");
+    }
 
     auto ct_p = SchemeP::template ModSwitch<SchemePt>(state.scheme_p.Process(state.bk_p, a, b, Params::kPlainModulus));
     auto ct_q = SchemeQ::template ModSwitch<SchemeQt>(state.scheme_q.Process(state.bk_q, a, b, Params::kPlainModulus));
