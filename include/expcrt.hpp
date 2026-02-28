@@ -16,30 +16,6 @@ enum class ExpCrtVariant {
 };
 
 template <typename PolyPT, typename PolyQT>
-void Tensor(Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> &out, const PolyPT &lhs, const PolyQT &rhs) {
-    using TensorNTT = TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>;
-    using Z = typename TensorNTT::Z;
-
-    if (lhs.is_coeff || rhs.is_coeff) {
-        throw std::runtime_error("Tensor product is not supported for coefficient domain");
-    }
-
-    out.is_coeff = false;
-    for (size_t i = 0; i < PolyPT::N; ++i) {
-        for (size_t j = 0; j < PolyQT::N; ++j) {
-            out.a[i * PolyQT::N + j] = Z::Mul(lhs.a[i], rhs.a[j]);
-        }
-    }
-}
-
-template <typename PolyPT, typename PolyQT>
-Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> Tensor(const PolyPT &lhs, const PolyQT &rhs) {
-    Poly<TensorNTTImpl<typename PolyPT::NTT, typename PolyQT::NTT>> out(false);
-    Tensor(out, lhs, rhs);
-    return out;
-}
-
-template <typename PolyPT, typename PolyQT>
 void Tensor(
     EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> &out,
     const EvalPoly<PolyPT> &lhs,

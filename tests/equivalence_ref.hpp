@@ -33,6 +33,24 @@ struct ToyEqParams {
     using NTTqt = CircToyQ;
     using NTTpq = TensorToy;
 
+    using EvalP = EvalPoly<NTTp>;
+    using EvalQ = EvalPoly<NTTq>;
+    using EvalPt = EvalPoly<NTTpt>;
+    using EvalQt = EvalPoly<NTTqt>;
+    using EvalPQ = EvalPoly<NTTpq>;
+
+    using CoeffP = CoeffPoly<NTTp>;
+    using CoeffQ = CoeffPoly<NTTq>;
+    using CoeffPt = CoeffPoly<NTTpt>;
+    using CoeffQt = CoeffPoly<NTTqt>;
+    using CoeffPQ = CoeffPoly<NTTpq>;
+
+    using PlanP = CanonicalNttPlan<NTTp>;
+    using PlanQ = CanonicalNttPlan<NTTq>;
+    using PlanPt = CanonicalNttPlan<NTTpt>;
+    using PlanQt = CanonicalNttPlan<NTTqt>;
+    using PlanPQ = CanonicalNttPlan<NTTpq>;
+
     using PolyP = Poly<NTTp>;
     using PolyQ = Poly<NTTq>;
     using PolyPt = Poly<NTTpt>;

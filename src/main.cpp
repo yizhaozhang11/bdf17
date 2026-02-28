@@ -56,8 +56,9 @@ int main() {
 
     auto plain_lut = bdf17::BuildParityLut<Params>();
     auto lut_samples = bdf17::BuildTensorLutSamples<Params>(plain_lut);
-    auto lut_poly = bdf17::ConstructLutPoly<Params>(lut_samples);
-    lut_poly.ToNTT();
+    auto lut_coeff = bdf17::ConstructLutPoly<Params>(lut_samples);
+    Params::PlanPQ plan_pq;
+    auto lut_eval = plan_pq.forward(lut_coeff);
 
     bdf17::AccumulatorState<Params> accumulator(lwe_secret_accumulator);
     bdf17::TensorExpCrtState<Params> expcrt(lwe_secret_frontend, accumulator.sk_p, accumulator.sk_q);
@@ -101,7 +102,7 @@ int main() {
 
         start_timer();
         auto tensor_ct = bdf17::ExpCRT<Params>(expcrt, ct_p, ct_q, bdf17::ExpCrtVariant::TensorTrick);
-        auto extracted = bdf17::FunExtract<Params>(tensor_ct, lut_poly);
+        auto extracted = bdf17::FunExtract<Params>(tensor_ct, lut_eval);
         end_timer();
 
         bdf17::LweCiphertext extracted_internal{extracted.a, extracted.b};

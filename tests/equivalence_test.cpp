@@ -118,9 +118,9 @@ void ExpectVecEqWithFirstMismatch(const std::vector<uint64_t> &actual, const std
 
 uint64_t CurrentSemanticScalar(const std::vector<uint64_t> &lut_pair_coeff, const std::vector<uint64_t> &pair_monomial) {
     auto product_pair = Convolution2DRef(lut_pair_coeff, pair_monomial);
-    auto product_poly = ToyEqParams::PolyPQ::FromCoeff(product_pair);
+    auto product_poly = ToyEqParams::SchemePQ::Coeff::FromUnsigned(product_pair);
     auto traced = bdf17::TracePQtoP<ToyEqParams>(product_poly);
-    return bdf17::TracePtoZ(traced);
+    return bdf17::TracePtoZ<ToyEqParams>(traced);
 }
 
 uint64_t PaperSemanticScalar(const std::vector<uint64_t> &lut_paper_folded, size_t folded_monomial_index) {
@@ -266,15 +266,16 @@ TEST(Equivalence, FoldIndexIdentityExhaustive) {
 }
 
 TEST(Equivalence, TensorNttMatchesCoeffTensorOnMonomials) {
+    ToyEqParams::SchemePt::Plan plan_p;
+    ToyEqParams::SchemeQt::Plan plan_q;
+
     for (size_t a = 0; a < kP; ++a) {
         for (size_t b = 0; b < kQ; ++b) {
             auto lhs_coeff = MakeMonomialP(a);
             auto rhs_coeff = MakeMonomialQ(b);
 
-            auto lhs_ntt = ToyEqParams::PolyPt::FromCoeff(lhs_coeff);
-            auto rhs_ntt = ToyEqParams::PolyQt::FromCoeff(rhs_coeff);
-            lhs_ntt.ToNTT();
-            rhs_ntt.ToNTT();
+            auto lhs_ntt = plan_p.forward(ToyEqParams::SchemePt::Coeff::FromUnsigned(lhs_coeff));
+            auto rhs_ntt = plan_q.forward(ToyEqParams::SchemeQt::Coeff::FromUnsigned(rhs_coeff));
 
             auto tensor_ntt = bdf17::Tensor(lhs_ntt, rhs_ntt);
             const auto actual = ToCoeffVector(tensor_ntt);
@@ -288,14 +289,15 @@ TEST(Equivalence, TensorNttMatchesCoeffTensorOnMonomials) {
 }
 
 TEST(Equivalence, TensorNttMatchesCoeffTensorOnRandomInputs) {
+    ToyEqParams::SchemePt::Plan plan_p;
+    ToyEqParams::SchemeQt::Plan plan_q;
+
     for (size_t case_id = 0; case_id < kRandomCases; ++case_id) {
         auto lhs_coeff = RandomCoeffVector(kP, 0xA110000ULL + case_id);
         auto rhs_coeff = RandomCoeffVector(kQ, 0xB220000ULL + case_id);
 
-        auto lhs_ntt = ToyEqParams::PolyPt::FromCoeff(lhs_coeff);
-        auto rhs_ntt = ToyEqParams::PolyQt::FromCoeff(rhs_coeff);
-        lhs_ntt.ToNTT();
-        rhs_ntt.ToNTT();
+        auto lhs_ntt = plan_p.forward(ToyEqParams::SchemePt::Coeff::FromUnsigned(lhs_coeff));
+        auto rhs_ntt = plan_q.forward(ToyEqParams::SchemeQt::Coeff::FromUnsigned(rhs_coeff));
 
         auto tensor_ntt = bdf17::Tensor(lhs_ntt, rhs_ntt);
         const auto actual = ToCoeffVector(tensor_ntt);
@@ -480,8 +482,8 @@ TEST(Equivalence, ExpCrtPlusF0ExtractionMatchesPaperReferenceNoiseless) {
             const auto paper_phase_monomial = ScaleVectorModRef(paper_phase, phase_unit_inv);
 
             const auto current_product_pair = Convolution2DRef(current_f0_lut_pair, current_phase_monomial_pair);
-            const auto current_trace = bdf17::TracePQtoP<ToyEqParams>(ToyEqParams::PolyPQ::FromCoeff(current_product_pair));
-            const uint64_t current_scalar = bdf17::TracePtoZ(current_trace);
+            const auto current_trace = bdf17::TracePQtoP<ToyEqParams>(ToyEqParams::SchemePQ::Coeff::FromUnsigned(current_product_pair));
+            const uint64_t current_scalar = bdf17::TracePtoZ<ToyEqParams>(current_trace);
 
             const auto paper_product = Convolution1DRef(paper_f0_lut, paper_phase_monomial);
             const auto paper_trace = PaperTraceCoeffRef(paper_product);
@@ -501,7 +503,7 @@ TEST(Equivalence, TraceCoeffMatchesTransportedPaperTraceExhaustive) {
     for (size_t u = 0; u < kP; ++u) {
         for (size_t v = 0; v < kQ; ++v) {
             const auto pair_coeff = MakePairMonomial(u, v);
-            auto pair_poly = ToyEqParams::PolyPQ::FromCoeff(pair_coeff);
+            auto pair_poly = ToyEqParams::SchemePQ::Coeff::FromUnsigned(pair_coeff);
 
             const auto actual = ToCoeffVector(bdf17::TracePQtoP<ToyEqParams>(pair_poly));
             const auto expected = CrtTraceTransportedRef(pair_coeff);
@@ -516,8 +518,8 @@ TEST(Equivalence, TraceCoeffMatchesTransportedPaperTraceExhaustive) {
 TEST(Equivalence, TraceNttMatchesTransportedPaperTraceRandom) {
     for (size_t case_id = 0; case_id < kRandomCases; ++case_id) {
         const auto pair_coeff = RandomCoeffVector(kPQ, 0xD440000ULL + case_id);
-        auto pair_poly = ToyEqParams::PolyPQ::FromCoeff(pair_coeff);
-        pair_poly.ToNTT();
+        ToyEqParams::SchemePQ::Plan plan_pq;
+        auto pair_poly = plan_pq.forward(ToyEqParams::SchemePQ::Coeff::FromUnsigned(pair_coeff));
 
         const auto actual = ToCoeffVector(bdf17::TracePQtoP<ToyEqParams>(pair_poly));
         const auto expected = CrtTraceTransportedRef(pair_coeff);
@@ -559,26 +561,27 @@ TEST(Equivalence, EndToEndNoiselessSemanticAgreement) {
     const auto samples = bdf17::BuildTensorLutSamples<ToyEqParams>(plain_lut);
 
     auto lut_pair_coeff = bdf17::ConstructLutPoly<ToyEqParams>(samples);
-    auto lut_pair_ntt = lut_pair_coeff;
-    lut_pair_ntt.ToNTT();
+    ToyEqParams::SchemePQ::Plan plan_pq;
+    auto lut_pair_ntt = plan_pq.forward(lut_pair_coeff);
 
     const auto lut_pair_coeff_vec = ToCoeffVector(lut_pair_coeff);
     const auto lut_paper = FoldPaperRef(GaloisPairRef(lut_pair_coeff_vec, kAlpha, kBeta));
+
+    ToyEqParams::SchemePt::Plan plan_p;
+    ToyEqParams::SchemeQt::Plan plan_q;
 
     const std::vector<size_t> messages{0, 1, 2, 7, 13, 42, 90};
     for (size_t m : messages) {
         const size_t u = m % kP;
         const size_t v = m % kQ;
 
-        auto monomial_p = ToyEqParams::PolyPt::FromCoeff(MakeMonomialP(u));
-        auto monomial_q = ToyEqParams::PolyQt::FromCoeff(MakeMonomialQ(v));
-        monomial_p.ToNTT();
-        monomial_q.ToNTT();
+        auto monomial_p = plan_p.forward(ToyEqParams::SchemePt::Coeff::FromUnsigned(MakeMonomialP(u)));
+        auto monomial_q = plan_q.forward(ToyEqParams::SchemeQt::Coeff::FromUnsigned(MakeMonomialQ(v)));
 
         auto tensor_state_ntt = bdf17::Tensor(monomial_p, monomial_q);
         auto multiplied_ntt = lut_pair_ntt * tensor_state_ntt;
         const auto traced_ntt = bdf17::TracePQtoP<ToyEqParams>(multiplied_ntt);
-        const uint64_t current_scalar = bdf17::TracePtoZ(traced_ntt);
+        const uint64_t current_scalar = bdf17::TracePtoZ<ToyEqParams>(traced_ntt);
 
         const uint64_t paper_scalar = PaperSemanticScalar(lut_paper, CrtFoldIndex(u, v));
         EXPECT_EQ(current_scalar, paper_scalar) << "m=" << m << " (u,v)=(" << u << "," << v << ")";
