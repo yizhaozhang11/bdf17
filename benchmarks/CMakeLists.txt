@@ -33,8 +33,5 @@ target_link_libraries("${PROJECT_NAME}_benchmarks"
     benchmark::benchmark_main
 )
 
-# Optionally, set compile options for benchmarks
-target_compile_options("${PROJECT_NAME}_benchmarks" PRIVATE -Ofast -march=native -mavx2 -funroll-loops -ftree-vectorize -Wno-unused-parameter)
-
 # Installation rules for benchmarks (optional)
 # install(TARGETS gpv23_benchmarks DESTINATION bin)

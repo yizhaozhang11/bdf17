@@ -1,42 +1,57 @@
 #include <benchmark/benchmark.h>
 
+#include <vector>
+
 #include "ntt.h"
+#include "ntt_plan.hpp"
 
 #define REPETITIONS 3
 
-static void BM_ForwardCT23NTT(benchmark::State& state) {
-    using NTT12289 = NTT<1152921504107839489LL, 19, 12289, 11>;
-    uint64_t a[12288] = {0, 1};
-    uint64_t scratch[12288];
-    for (auto _ : state) {
-        NTT12289::GetInstance().ForwardNTT(a, scratch);
+namespace {
+
+template <typename Transform>
+CoeffPoly<Transform> DeterministicInput() {
+    std::vector<uint64_t> data(Transform::N, 0);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        data[i] = ((i * 17ULL) + 13ULL) % Transform::p;
     }
+    return CoeffPoly<Transform>::FromUnsigned(data);
 }
 
-BENCHMARK(BM_ForwardCT23NTT)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);
+template <typename Transform, Backend B>
+static void BM_PlanForward(benchmark::State &state) {
+    using Plan = CanonicalNttPlan<Transform, B>;
+    Plan plan;
+    typename Plan::Workspace workspace;
+    const auto coeff = DeterministicInput<Transform>();
 
-static void BM_ForwardRaderNTT769(benchmark::State& state) {
-    using NTT769 = NTT<1152921504602791681LL, 11, 769, 11>;
-    uint64_t a[768] = {0, 1};
     for (auto _ : state) {
-        NTT769::GetInstance().ForwardNTT(a);
+        const auto eval = plan.forward(coeff, workspace);
+        benchmark::DoNotOptimize(eval.data());
+        benchmark::ClobberMemory();
     }
+    state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * Transform::N));
 }
 
-BENCHMARK(BM_ForwardRaderNTT769)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);
+using Primitive769 = NTT<1152921504602791681ULL, 11ULL, 769, 11>;
+using Primitive12289 = NTT<1152921504107839489ULL, 19ULL, 12289, 11>;
 
-static void BM_ForwardRaderNTT12289(benchmark::State& state) {
-    using NTT12289 = NTT<1152921504107839489LL, 19, 12289, 11>;
-    uint64_t a[12288] = {0, 1};
-    for (auto _ : state) {
-        NTT12289::GetInstance().ForwardNTT(a);
-    }
+} // namespace
+
+static void BM_PlanForwardPrimitive769Auto(benchmark::State &state) {
+    BM_PlanForward<Primitive769, Backend::Auto>(state);
 }
 
-BENCHMARK(BM_ForwardRaderNTT12289)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);
+BENCHMARK(BM_PlanForwardPrimitive769Auto)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);
 
-// Register the benchmark main function if not already provided
-// This is typically handled by Google Benchmark's CMake integration
-// but can be added here if necessary.
+static void BM_PlanForwardPrimitive12289Auto(benchmark::State &state) {
+    BM_PlanForward<Primitive12289, Backend::Auto>(state);
+}
 
-// BENCHMARK_MAIN(); // Uncomment if needed
+BENCHMARK(BM_PlanForwardPrimitive12289Auto)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);
+
+static void BM_PlanForwardPrimitive12289Scalar(benchmark::State &state) {
+    BM_PlanForward<Primitive12289, Backend::Scalar>(state);
+}
+
+BENCHMARK(BM_PlanForwardPrimitive12289Scalar)->Repetitions(REPETITIONS)->ReportAggregatesOnly(true);

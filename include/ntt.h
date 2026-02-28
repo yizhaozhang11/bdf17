@@ -11,6 +11,7 @@
 #include <immintrin.h>
 #endif
 
+#include "ntt_backend.hpp"
 #include "zp.h"
 
 template <uint64_t p_, uint64_t g_, size_t O_, size_t w_>
@@ -127,22 +128,32 @@ public:
     constexpr static std::array<uint64_t, N> bit_reverse_table = PrecomputeBitReverseTable();
 
     void ForwardNTT(uint64_t a[]) {
-        std::array<uint64_t, N> scratch{};
-        ForwardNTT(a, scratch.data());
+        ForwardNTTWithBackend<Backend::Auto>(a);
     }
 
     void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
+        ForwardNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
+    template <Backend B = Backend::Auto>
+    void ForwardNTTWithBackend(uint64_t a[]) {
+        std::array<uint64_t, N> scratch{};
+        ForwardNTTWithBackend<B>(a, scratch.data());
+    }
+
+    template <Backend B = Backend::Auto>
+    void ForwardNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t i = 0; i < N; i++) {
             scratch[i] = a[gi[i] - 1];
         }
 
-        ForwardMixedRadix23NTT(scratch, a);
+        ForwardMixedRadix23NTT<B>(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = Z::MulFastConst(a[i], omega_O_table[i], omega_O_barrett_table[i]);
         }
 
-        InverseMixedRadix23NTT(a, scratch);
+        InverseMixedRadix23NTT<B>(a, scratch);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = scratch[(N - gi_inv[i + 1]) % N];
@@ -150,22 +161,32 @@ public:
     }
 
     void InverseNTT(uint64_t a[]) {
-        std::array<uint64_t, N> scratch{};
-        InverseNTT(a, scratch.data());
+        InverseNTTWithBackend<Backend::Auto>(a);
     }
 
     void InverseNTT(uint64_t a[], uint64_t scratch[]) {
+        InverseNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
+    template <Backend B = Backend::Auto>
+    void InverseNTTWithBackend(uint64_t a[]) {
+        std::array<uint64_t, N> scratch{};
+        InverseNTTWithBackend<B>(a, scratch.data());
+    }
+
+    template <Backend B = Backend::Auto>
+    void InverseNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t i = 0; i < N; i++) {
             scratch[i] = a[gi[(N - i) % N] - 1];
         }
 
-        ForwardMixedRadix23NTT(scratch, a);
+        ForwardMixedRadix23NTT<B>(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = Z::MulFastConst(a[i], omega_O_inv_table[i], omega_O_inv_barrett_table[i]);
         }
 
-        InverseMixedRadix23NTT(a, scratch);
+        InverseMixedRadix23NTT<B>(a, scratch);
 
         for (size_t i = 0; i < N; i++) {
             a[i] = scratch[gi_inv[i + 1]];
@@ -516,22 +537,55 @@ private:
 #endif
 
     void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+        MixedRadix23NTTWithBackend<Backend::Auto>(a, b, omega, omega_barrett);
+    }
+
+    template <Backend B = Backend::Auto>
+    void MixedRadix23NTTWithBackend(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
         static_assert(N >= 2, "MixedRadix23 NTT kernel requires N >= 2 (equivalently O >= 3)");
+        if constexpr (B == Backend::Scalar) {
+            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+        } else if constexpr (B == Backend::Avx512) {
 #if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
-        MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
 #elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
-        MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
 #else
-        MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
 #endif
+        } else if constexpr (B == Backend::Avx2) {
+#if defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
+            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+#else
+            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+#endif
+        } else {
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
+            MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
+#elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
+            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+#else
+            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+#endif
+        }
     }
 
     void ForwardMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
-        MixedRadix23NTT(a, b, omega_N_table, omega_N_barrett_table);
+        ForwardMixedRadix23NTT<Backend::Auto>(a, b);
+    }
+
+    template <Backend B = Backend::Auto>
+    void ForwardMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
+        MixedRadix23NTTWithBackend<B>(a, b, omega_N_table, omega_N_barrett_table);
     }
 
     void InverseMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
-        MixedRadix23NTT(a, b, omega_N_inv_table, omega_N_inv_barrett_table);
+        InverseMixedRadix23NTT<Backend::Auto>(a, b);
+    }
+
+    template <Backend B = Backend::Auto>
+    void InverseMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
+        MixedRadix23NTTWithBackend<B>(a, b, omega_N_inv_table, omega_N_inv_barrett_table);
     }
 
     void ComputeOmegaNTable() {
@@ -600,13 +654,18 @@ public:
     constexpr static uint64_t N_inv = Z::Pow(N, p - 2);
 
     void ForwardNTT(uint64_t a[]) {
+        ForwardNTTWithBackend<Backend::Auto>(a);
+    }
+
+    template <Backend B = Backend::Auto>
+    void ForwardNTTWithBackend(uint64_t a[]) {
         auto t = a[0];
         for (size_t i = 1; i < N; i++) {
             a[0] = Z::Add(a[0], a[i]);
         }
 
         std::array<uint64_t, PrimitiveNTT::N> scratch{};
-        PrimitiveNTT::GetInstance().ForwardNTT(a + 1, scratch.data());
+        PrimitiveNTT::GetInstance().template ForwardNTTWithBackend<B>(a + 1, scratch.data());
 
         for (size_t i = 1; i < N; i++) {
             a[i] = Z::Add(a[i], t);
@@ -614,8 +673,13 @@ public:
     }
 
     void InverseNTT(uint64_t a[]) {
+        InverseNTTWithBackend<Backend::Auto>(a);
+    }
+
+    template <Backend B = Backend::Auto>
+    void InverseNTTWithBackend(uint64_t a[]) {
         std::array<uint64_t, PrimitiveNTT::N> scratch{};
-        PrimitiveNTT::GetInstance().InverseNTT(a + 1, scratch.data());
+        PrimitiveNTT::GetInstance().template InverseNTTWithBackend<B>(a + 1, scratch.data());
 
         auto t = a[0];
         for (size_t i = 1; i < N; i++) {
@@ -653,17 +717,27 @@ public:
     static_assert(NTTp::g == NTTq::g, "g must be the same");
 
     static void ForwardNTT(uint64_t a[]) {
-        auto scratch = std::make_unique<uint64_t[]>(N);
-        ForwardNTT(a, scratch.get());
+        ForwardNTTWithBackend<Backend::Auto>(a);
     }
 
     static void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
+        ForwardNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
+    template <Backend B = Backend::Auto>
+    static void ForwardNTTWithBackend(uint64_t a[]) {
+        auto scratch = std::make_unique<uint64_t[]>(N);
+        ForwardNTTWithBackend<B>(a, scratch.get());
+    }
+
+    template <Backend B = Backend::Auto>
+    static void ForwardNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t i = 0; i < NTTp::N; i++) {
             auto *b = scratch + NTTq::N * i;
             for (size_t j = 0; j < NTTq::N; j++) {
                 b[j] = a[NTTq::N * i + j];
             }
-            NTTq::GetInstance().ForwardNTT(b);
+            NTTq::GetInstance().template ForwardNTTWithBackend<B>(b);
         }
 
         std::copy(scratch, scratch + N, a);
@@ -673,7 +747,7 @@ public:
             for (size_t i = 0; i < NTTp::N; i++) {
                 b[i] = a[NTTq::N * i + j];
             }
-            NTTp::GetInstance().ForwardNTT(b);
+            NTTp::GetInstance().template ForwardNTTWithBackend<B>(b);
         }
         for (size_t j = 0; j < NTTq::N; j++) {
             for (size_t i = 0; i < NTTp::N; i++) {
@@ -683,17 +757,27 @@ public:
     }
 
     static void InverseNTT(uint64_t a[]) {
-        auto scratch = std::make_unique<uint64_t[]>(N);
-        InverseNTT(a, scratch.get());
+        InverseNTTWithBackend<Backend::Auto>(a);
     }
 
     static void InverseNTT(uint64_t a[], uint64_t scratch[]) {
+        InverseNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
+    template <Backend B = Backend::Auto>
+    static void InverseNTTWithBackend(uint64_t a[]) {
+        auto scratch = std::make_unique<uint64_t[]>(N);
+        InverseNTTWithBackend<B>(a, scratch.get());
+    }
+
+    template <Backend B = Backend::Auto>
+    static void InverseNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t j = 0; j < NTTq::N; j++) {
             auto *b = scratch + NTTp::N * j;
             for (size_t i = 0; i < NTTp::N; i++) {
                 b[i] = a[NTTq::N * i + j];
             }
-            NTTp::GetInstance().InverseNTT(b);
+            NTTp::GetInstance().template InverseNTTWithBackend<B>(b);
         }
         for (size_t j = 0; j < NTTq::N; j++) {
             for (size_t i = 0; i < NTTp::N; i++) {
@@ -706,7 +790,7 @@ public:
             for (size_t j = 0; j < NTTq::N; j++) {
                 b[j] = a[NTTq::N * i + j];
             }
-            NTTq::GetInstance().InverseNTT(b);
+            NTTq::GetInstance().template InverseNTTWithBackend<B>(b);
         }
 
         std::copy(scratch, scratch + N, a);

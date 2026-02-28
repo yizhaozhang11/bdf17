@@ -7,6 +7,7 @@
 
 #include "ntt.h"
 #include "ntt_plan.hpp"
+#include "params.hpp"
 #include "poly.h"
 #include "typed_poly.hpp"
 
@@ -15,6 +16,10 @@ namespace {
 using CircToyP = CircNTT<1093ULL, 5ULL, 7, 3>;
 using CircToyQ = CircNTT<1093ULL, 5ULL, 13, 2>;
 using TensorToy = TensorNTTImpl<CircToyP, CircToyQ>;
+using CurrentCircP = bdf17::DefaultParams::NTTp;
+using CurrentCircQ = bdf17::DefaultParams::NTTq;
+using EdgeCircUV10 = CircNTT<72057421557668737ULL, 5ULL, 3, 2>;
+using EdgeCircUV1m = CircNTT<2053ULL, 2ULL, 19, 2>;
 
 template <typename Transform>
 std::vector<uint64_t> RandomCoeffVector(uint64_t seed) {
@@ -55,23 +60,97 @@ void ExpectPlanMatchesLegacyForwardInverse(uint64_t seed) {
 }
 
 template <typename Transform>
-void ExpectPlanBackendsMatchLegacy(uint64_t seed) {
-    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Auto>(seed + 0);
-    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Scalar>(seed + 1);
-    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Avx2>(seed + 2);
-    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Avx512>(seed + 3);
+void ExpectAutoMatchesLegacy(uint64_t seed) {
+    ExpectPlanMatchesLegacyForwardInverse<Transform, Backend::Auto>(seed);
+}
+
+template <typename Transform, Backend B>
+void ExpectBackendMatchesScalar(uint64_t seed) {
+    using ScalarPlan = CanonicalNttPlan<Transform, Backend::Scalar>;
+    using OtherPlan = CanonicalNttPlan<Transform, B>;
+    using Coeff = CoeffPoly<Transform>;
+
+    const auto input = RandomCoeffVector<Transform>(seed);
+    const auto coeff = Coeff::FromUnsigned(input);
+
+    ScalarPlan scalar_plan;
+    OtherPlan other_plan;
+    typename ScalarPlan::Workspace scalar_workspace;
+    typename OtherPlan::Workspace other_workspace;
+
+    const auto eval_scalar = scalar_plan.forward(coeff, scalar_workspace);
+    const auto eval_other = other_plan.forward(coeff, other_workspace);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        EXPECT_EQ(eval_other[i], eval_scalar[i]);
+    }
+
+    const auto round_scalar = scalar_plan.inverse(eval_scalar, scalar_workspace);
+    const auto round_other = other_plan.inverse(eval_other, other_workspace);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        EXPECT_EQ(round_other[i], round_scalar[i]);
+        EXPECT_EQ(round_other[i], input[i]);
+    }
+}
+
+template <typename Transform>
+void ExpectBackendsMatchScalar(uint64_t seed) {
+    ExpectBackendMatchesScalar<Transform, Backend::Auto>(seed + 0);
+    if constexpr (BackendCompiled<Backend::Avx2>()) {
+        ExpectBackendMatchesScalar<Transform, Backend::Avx2>(seed + 1);
+    }
+    if constexpr (BackendCompiled<Backend::Avx512>()) {
+        ExpectBackendMatchesScalar<Transform, Backend::Avx512>(seed + 2);
+    }
+}
+
+template <typename Transform>
+void ExpectWorkspaceReuse(uint64_t seed) {
+    using Plan = CanonicalNttPlan<Transform, Backend::Auto>;
+    using Coeff = CoeffPoly<Transform>;
+
+    Plan plan;
+    typename Plan::Workspace workspace;
+    const auto coeff = Coeff::FromUnsigned(RandomCoeffVector<Transform>(seed));
+
+    const auto eval = plan.forward(coeff, workspace);
+    ASSERT_GE(workspace.scratch.size(), Transform::N);
+    uint64_t *const scratch_ptr = workspace.scratch.data();
+
+    const auto roundtrip = plan.inverse(eval, workspace);
+    EXPECT_EQ(workspace.scratch.data(), scratch_ptr);
+    for (size_t i = 0; i < Transform::N; ++i) {
+        EXPECT_EQ(roundtrip[i], coeff[i]);
+    }
 }
 
 } // namespace
 
-TEST(NttPlan, CircPBackendsMatchLegacySemantics) {
-    ExpectPlanBackendsMatchLegacy<CircToyP>(101);
+TEST(NttPlan, CircPAutoMatchesLegacySemantics) {
+    ExpectAutoMatchesLegacy<CircToyP>(101);
 }
 
-TEST(NttPlan, CircQBackendsMatchLegacySemantics) {
-    ExpectPlanBackendsMatchLegacy<CircToyQ>(201);
+TEST(NttPlan, CircQAutoMatchesLegacySemantics) {
+    ExpectAutoMatchesLegacy<CircToyQ>(201);
 }
 
-TEST(NttPlan, TensorBackendsMatchLegacySemantics) {
-    ExpectPlanBackendsMatchLegacy<TensorToy>(301);
+TEST(NttPlan, TensorAutoMatchesLegacySemantics) {
+    ExpectAutoMatchesLegacy<TensorToy>(301);
+}
+
+TEST(NttPlan, ScalarVsAvxBackendsMatchOnDefaultRings) {
+    ExpectBackendsMatchScalar<CurrentCircP>(401);
+    ExpectBackendsMatchScalar<CurrentCircQ>(501);
+}
+
+TEST(NttPlan, ScalarVsAvxBackendsMatchOnEdgeRings) {
+    ExpectBackendsMatchScalar<EdgeCircUV10>(601);
+    ExpectBackendsMatchScalar<EdgeCircUV1m>(701);
+}
+
+TEST(NttPlan, ScalarVsAvxBackendsMatchOnTensorRing) {
+    ExpectBackendsMatchScalar<TensorToy>(801);
+}
+
+TEST(NttPlan, TensorWorkspaceIsReusedAcrossCalls) {
+    ExpectWorkspaceReuse<TensorToy>(901);
 }
