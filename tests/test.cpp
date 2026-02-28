@@ -9,6 +9,7 @@
 
 #include "ntt.h"
 #include "poly.h"
+#include "rlwe.h"
 
 namespace {
 
@@ -353,4 +354,40 @@ TEST(NTTMatrix, EdgeExponentLargeCasesOptional) {
 
     ExpectCircularConvolutionViaNTT<CircUVnmP>(1000, 1001);
     ExpectCircularConvolutionViaNTT<CircUVnmQ>(1002, 1003);
+}
+
+TEST(PolyOps, CoeffDomainGaloisConjugatePreservesConstantTerm) {
+    using PolyToy = Poly<CircToyP>;
+
+    PolyToy x(true);
+    for (size_t i = 0; i < PolyToy::N; ++i) {
+        x.a[i] = (17 + i) % PolyToy::p;
+    }
+
+    auto y = PolyToy::GaloisConjugate(x, 3);
+    EXPECT_EQ(y.a[0], x.a[0]);
+}
+
+TEST(RLWESampling, EncryptSamplesZeroSumA) {
+    using PolyToy = Poly<CircToyP>;
+    using SchemeToy = SchemeImpl<PolyToy, 16>;
+
+    std::vector<int64_t> sk(PolyToy::N, 0);
+    sk[1] = 1;
+    SchemeToy scheme(sk);
+
+    PolyToy m(true);
+    m.ToNTT();
+
+    for (size_t iter = 0; iter < 10; ++iter) {
+        auto ct = scheme.RLWEEncrypt(m, scheme.sk, 8);
+        auto a = ct[0];
+        a.ToCoeff();
+
+        uint64_t sum = 0;
+        for (size_t i = 0; i < PolyToy::N; ++i) {
+            sum = (sum + a.a[i]) % PolyToy::p;
+        }
+        EXPECT_EQ(sum, 0ULL);
+    }
 }

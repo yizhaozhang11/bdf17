@@ -168,6 +168,33 @@ inline uint64_t DecryptLwe(const LweCiphertext &ct, const std::vector<int64_t> &
     return DecodeMessage(DecryptPhase(ct, sk, mod), plain_modulus, mod);
 }
 
+inline uint64_t ModSwitchScalar(uint64_t value, uint64_t q_from, uint64_t q_to) {
+    if (q_from == 0 || q_to == 0) {
+        throw std::runtime_error("modulus must be non-zero");
+    }
+
+    const __uint128_t scaled = (__uint128_t)(value % q_from) * q_to + q_from / 2;
+    uint64_t out = (uint64_t)(scaled / q_from);
+    if (out >= q_to) {
+        out -= q_to;
+    }
+    return out;
+}
+
+inline LweCiphertext ModSwitchLwe(const LweCiphertext &ct, uint64_t q_from, uint64_t q_to, uint64_t plain_modulus) {
+    if (plain_modulus == 0) {
+        throw std::runtime_error("plain modulus must be non-zero");
+    }
+
+    LweCiphertext out;
+    out.a.resize(ct.a.size(), 0);
+    for (size_t i = 0; i < ct.a.size(); ++i) {
+        out.a[i] = ModSwitchScalar(ct.a[i], q_from, q_to);
+    }
+    out.b = ModSwitchScalar(ct.b, q_from, q_to);
+    return out;
+}
+
 inline LweCiphertext PackBitsCiphertextsLE(const std::vector<LweCiphertext> &bit_ciphertexts, uint64_t plain_modulus, uint64_t mod) {
     if (bit_ciphertexts.empty()) {
         throw std::runtime_error("bit ciphertext list must be non-empty");

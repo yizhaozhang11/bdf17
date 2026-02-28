@@ -46,10 +46,15 @@ typename SchemeImpl<Poly, B>::RLWECiphertext SchemeImpl<Poly, B>::RLWEEncrypt(co
 
     Poly result(false);
     for (size_t i = 0; i < k; i++) {
-        Poly a(false);
-        for (size_t j = 0; j < Poly::N; j++) {
+        // BDF17-style CLWE sampling: choose a in the sum-zero subspace.
+        Poly a(true);
+        uint64_t sum = 0;
+        for (size_t j = 1; j < Poly::N; j++) {
             a.a[j] = distribution(engine);
+            sum = Poly::Z::Add(sum, a.a[j]);
         }
+        a.a[0] = Poly::Z::Sub(0, sum);
+        a.ToNTT();
         result = result + a * sk[i];
         ct.push_back(a);
     }

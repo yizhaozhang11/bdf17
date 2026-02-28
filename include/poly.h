@@ -149,7 +149,7 @@ public:
     constexpr static Poly GaloisConjugate(const Poly &x, const size_t &a) {
     Poly ret(x.is_coeff);
     if (x.is_coeff) {
-        ret.a[a] = x.a[0];
+        ret.a[0] = x.a[0];
         for (size_t i = 1; i < Poly::N; i++) {
             ret.a[i * a % Poly::O] = x.a[i];
         }

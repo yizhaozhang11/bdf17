@@ -12,8 +12,8 @@ namespace bdf17 {
 
 struct DefaultParams {
     // n, t, B
-    static constexpr size_t kLweInputDimension = 600;
-    static constexpr size_t kLweOutputDimension = 600;
+    static constexpr size_t kLweFrontendDimension = 600;
+    static constexpr size_t kLweAccumulatorDimension = 600;
     static constexpr uint64_t kPlainModulus = 64;
     static constexpr uint64_t kKeySwitchBase = 1ULL << 8;
     static constexpr uint64_t kLweKeySwitchBase = kKeySwitchBase;
@@ -51,8 +51,12 @@ struct DefaultParams {
     using SchemeQt = SchemeImpl<PolyQt, kKeySwitchBase>;
 
     static constexpr size_t kTensorDimension = PolyP::N * PolyQ::N;
+    static constexpr uint64_t kAccumulatorInputModulus = kTensorDimension;
+    static constexpr uint64_t kExtractModulus = Z::p;
+    static constexpr uint64_t kFrontendModulus = kExtractModulus;
 
-    static_assert(kLweInputDimension <= PolyP::N, "kLweInputDimension must not exceed PolyP::N");
+    static_assert(kLweFrontendDimension <= PolyP::N, "kLweFrontendDimension must not exceed PolyP::N");
+    static_assert(kLweAccumulatorDimension > 0, "kLweAccumulatorDimension must be positive");
 };
 
 } // namespace bdf17

@@ -32,7 +32,7 @@ struct AccumulatorState {
           sk_q(GaussianSampler<PolyQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
           scheme_p(sk_p),
           scheme_q(sk_q) {
-        if (lwe_secret.size() != Params::kLweInputDimension) {
+        if (lwe_secret.size() != Params::kLweAccumulatorDimension) {
             throw std::runtime_error("lwe_secret size mismatch");
         }
         scheme_p.GaloisKeyGen();
@@ -52,7 +52,7 @@ AccumulatorOutput<Params> ExtExpInner(AccumulatorState<Params> &state, const std
     using SchemePt = typename Params::SchemePt;
     using SchemeQt = typename Params::SchemeQt;
 
-    if (a.size() != Params::kLweInputDimension) {
+    if (a.size() != Params::kLweAccumulatorDimension) {
         throw std::runtime_error("LWE input dimension mismatch");
     }
 
