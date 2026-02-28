@@ -514,6 +514,7 @@ private:
 #endif
 
     void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+        static_assert(N >= 2, "MixedRadix23 NTT kernel requires N >= 2 (equivalently O >= 3)");
 #if defined(__AVX512F__) && defined(__AVX512DQ__)
         MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
 #elif defined(__AVX2__)
