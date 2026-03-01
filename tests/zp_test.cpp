@@ -53,8 +53,9 @@ void ExpectArithmeticAgreement(uint64_t seed) {
 
             const auto mul_const = Z::MakeConstMultiplier(b);
             EXPECT_EQ(Z::MulConst(a, mul_const), RefMul<Z>(a, b));
-            EXPECT_EQ(Z::MulFastConst(a, b, mul_const.shoup), RefMul<Z>(a, b));
-            EXPECT_EQ(Z::ComputeBarrettFactor(b), mul_const.shoup);
+            const uint64_t expected_shoup =
+                static_cast<uint64_t>((static_cast<__uint128_t>(b % Z::p) << 64) / Z::p);
+            EXPECT_EQ(mul_const.shoup, expected_shoup);
         }
     }
 
@@ -67,7 +68,6 @@ void ExpectArithmeticAgreement(uint64_t seed) {
 
         const auto mul_const = Z::MakeConstMultiplier(b);
         EXPECT_EQ(Z::MulConst(a, mul_const), RefMul<Z>(a, b));
-        EXPECT_EQ(Z::MulFastConst(a, b, mul_const.shoup), RefMul<Z>(a, b));
     }
 }
 

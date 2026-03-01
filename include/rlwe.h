@@ -75,7 +75,6 @@ public:
 
     using Coeff = CoeffPoly<Transform>;
     using Eval = EvalPoly<Transform>;
-    using Poly = Eval; // Compatibility-only alias; prefer Coeff/Eval in new code.
     using CoeffBuffer = CoeffPolyBuffer<Transform>;
     using EvalBuffer = EvalPolyBuffer<Transform>;
 

@@ -172,7 +172,6 @@ include/
   ntt_backend.hpp     Backend enum and compile-time backend detection
   ntt_plan.hpp        Canonical forward/inverse plan wrapper with reusable workspace
   params.hpp          Default parameter bundle
-  poly.h              Legacy compatibility aliases for coeff/eval polys
   rlwe.h              SchemeImpl interface
   rlwe-impl.h         SchemeImpl implementation
   typed_poly.hpp      Heap-backed typed coefficient/evaluation polynomial container
@@ -412,4 +411,3 @@ If your goal is to move this toward a paper-comparison artifact, the most meanin
 
 - BDF17: *Large FHE Gates from Tensored Homomorphic Accumulator* (IACR ePrint 2017/996)
 - Borogrove: the reference implementation released by the paper's authors
-

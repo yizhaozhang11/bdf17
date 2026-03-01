@@ -66,14 +66,6 @@ public:
         return res;
     }
 
-    // Compatibility wrappers kept during migration.
-    static constexpr uint64_t MulFastConst(uint64_t a, uint64_t b, uint64_t b_mu) noexcept {
-        return MulConst(a, ConstMultiplier{b, b_mu});
-    }
-
-    static constexpr uint64_t ComputeBarrettFactor(uint64_t x) noexcept {
-        return MakeConstMultiplier(x).shoup;
-    }
 };
 
 #endif // ZP_H
