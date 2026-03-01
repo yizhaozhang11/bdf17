@@ -42,6 +42,16 @@ inline void MergeStageStats(StageStats &dst, const StageStats &src) {
     dst.approx_bytes += src.approx_bytes;
 }
 
+inline void MergeStageCounters(StageStats &dst, const StageStats &src) {
+    dst.forward_ntt += src.forward_ntt;
+    dst.inverse_ntt += src.inverse_ntt;
+    dst.galois += src.galois;
+    dst.keyswitch += src.keyswitch;
+    dst.extmult += src.extmult;
+    dst.trace_calls += src.trace_calls;
+    dst.approx_bytes += src.approx_bytes;
+}
+
 struct BootstrapMetrics {
     StageStats encrypt_bits;
     StageStats pack_bits;
@@ -55,6 +65,20 @@ struct BootstrapMetrics {
     StageStats decode_and_check;
     StageStats total;
 };
+
+inline void MergeBootstrapMetrics(BootstrapMetrics &dst, const BootstrapMetrics &src) {
+    MergeStageStats(dst.encrypt_bits, src.encrypt_bits);
+    MergeStageStats(dst.pack_bits, src.pack_bits);
+    MergeStageStats(dst.lwe_keyswitch, src.lwe_keyswitch);
+    MergeStageStats(dst.modswitch_in, src.modswitch_in);
+    MergeStageStats(dst.accum_p, src.accum_p);
+    MergeStageStats(dst.accum_q, src.accum_q);
+    MergeStageStats(dst.expcrt, src.expcrt);
+    MergeStageStats(dst.fun_extract, src.fun_extract);
+    MergeStageStats(dst.modswitch_out, src.modswitch_out);
+    MergeStageStats(dst.decode_and_check, src.decode_and_check);
+    MergeStageStats(dst.total, src.total);
+}
 
 struct BootstrapRequest {
     size_t trial_index = 0;
@@ -220,6 +244,7 @@ public:
         const auto start = Clock::now();
         auto tensor_ct = ExpCRT<Params>(*expcrt_, ct_p, ct_q, config_.expcrt_variant);
         stats.keyswitch = 1;
+        stats.extmult = 1;
         stats.approx_bytes = approx_expcrt_key_bytes_;
         stats.ms = ElapsedMs(start);
         return tensor_ct;
@@ -228,6 +253,7 @@ public:
     ExtractedLweSample<Params> RunFunExtract(typename Params::SchemePQ::RLWECiphertext tensor_ct, StageStats &stats) const {
         const auto start = Clock::now();
         auto extracted = FunExtract<Params>(std::move(tensor_ct), lut_eval_);
+        stats.inverse_ntt = 1;
         stats.trace_calls = 1;
         stats.ms = ElapsedMs(start);
         return extracted;
@@ -284,16 +310,16 @@ public:
         result.bits_le = bits_le;
 
         local_metrics.total.ms = ElapsedMs(total_start);
-        MergeStageStats(local_metrics.total, local_metrics.encrypt_bits);
-        MergeStageStats(local_metrics.total, local_metrics.pack_bits);
-        MergeStageStats(local_metrics.total, local_metrics.lwe_keyswitch);
-        MergeStageStats(local_metrics.total, local_metrics.modswitch_in);
-        MergeStageStats(local_metrics.total, local_metrics.accum_p);
-        MergeStageStats(local_metrics.total, local_metrics.accum_q);
-        MergeStageStats(local_metrics.total, local_metrics.expcrt);
-        MergeStageStats(local_metrics.total, local_metrics.fun_extract);
-        MergeStageStats(local_metrics.total, local_metrics.modswitch_out);
-        MergeStageStats(local_metrics.total, local_metrics.decode_and_check);
+        MergeStageCounters(local_metrics.total, local_metrics.encrypt_bits);
+        MergeStageCounters(local_metrics.total, local_metrics.pack_bits);
+        MergeStageCounters(local_metrics.total, local_metrics.lwe_keyswitch);
+        MergeStageCounters(local_metrics.total, local_metrics.modswitch_in);
+        MergeStageCounters(local_metrics.total, local_metrics.accum_p);
+        MergeStageCounters(local_metrics.total, local_metrics.accum_q);
+        MergeStageCounters(local_metrics.total, local_metrics.expcrt);
+        MergeStageCounters(local_metrics.total, local_metrics.fun_extract);
+        MergeStageCounters(local_metrics.total, local_metrics.modswitch_out);
+        MergeStageCounters(local_metrics.total, local_metrics.decode_and_check);
 
         if (metrics != nullptr) {
             *metrics = local_metrics;
@@ -367,6 +393,8 @@ private:
 
     static void FillAccumulatorApproxCounters(const std::vector<int64_t> &a, StageStats &stats) {
         const uint64_t nonzero = static_cast<uint64_t>(std::count_if(a.begin(), a.end(), [](int64_t x) { return x != 0; }));
+        stats.forward_ntt += nonzero * 2;
+        stats.inverse_ntt += nonzero;
         stats.extmult += nonzero;
         stats.galois += nonzero;
         stats.keyswitch += nonzero;

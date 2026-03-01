@@ -3,17 +3,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <optional>
-#include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "accumulator.hpp"
+#include "bootstrap_runner.hpp"
 #include "experiment_config.hpp"
-#include "expcrt.hpp"
-#include "fun_extract.hpp"
-#include "lwe_frontend.hpp"
 #include "params.hpp"
 
 namespace {
@@ -23,17 +19,10 @@ constexpr size_t kDefaultTrials = 8;
 constexpr const char *kDefaultProfileName = "default";
 constexpr const char *kDefaultLutName = "lowbit";
 
+using bdf17::BootstrapMetrics;
+using bdf17::BootstrapResult;
 using bdf17::ExperimentConfig;
-
-struct TrialResult {
-    size_t trial_index = 0;
-    std::string bits_le;
-    uint64_t packed_plain = 0;
-    uint64_t phase = 0;
-    size_t expected = 0;
-    size_t got = 0;
-    bool ok = false;
-};
+using bdf17::StageStats;
 
 std::string ToLower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -197,19 +186,12 @@ void ValidateExperimentConfig(const ExperimentConfig &config) {
     }
 }
 
-template <typename Params>
-std::vector<size_t> BuildLut(const ExperimentConfig &config) {
-    (void)config;
-    return bdf17::BuildParityLut<Params>();
-}
-
-std::string BitsLE(const uint64_t value, const size_t width) {
-    std::string bits;
-    bits.reserve(width);
-    for (size_t i = 0; i < width; ++i) {
-        bits.push_back(((value >> i) & 1ULL) != 0 ? '1' : '0');
-    }
-    return bits;
+void PrintStageText(const char *name, const StageStats &stats, size_t num_trials) {
+    const double avg_ms = num_trials == 0 ? 0.0 : stats.ms / static_cast<double>(num_trials);
+    std::cout << "  " << name << " ms_total=" << stats.ms << " ms_avg=" << avg_ms << " forward_ntt=" << stats.forward_ntt
+              << " inverse_ntt=" << stats.inverse_ntt << " galois=" << stats.galois << " keyswitch=" << stats.keyswitch
+              << " extmult=" << stats.extmult << " trace_calls=" << stats.trace_calls << " approx_bytes=" << stats.approx_bytes
+              << std::endl;
 }
 
 template <typename Params>
@@ -237,7 +219,7 @@ void PrintConfigText(const ExperimentConfig &config, bool dim_reduction_enabled,
     std::cout << std::endl;
 }
 
-void PrintTrialsText(const std::vector<TrialResult> &trials) {
+void PrintTrialsText(const std::vector<BootstrapResult> &trials) {
     size_t pass = 0;
     size_t fail = 0;
     for (const auto &trial : trials) {
@@ -254,8 +236,45 @@ void PrintTrialsText(const std::vector<TrialResult> &trials) {
     std::cout << "summary pass=" << pass << " fail=" << fail << std::endl;
 }
 
+void PrintMetricsText(const BootstrapMetrics &metrics, size_t num_trials) {
+    std::cout << std::endl;
+    std::cout << "stage_metrics" << std::endl;
+    PrintStageText("encrypt_bits", metrics.encrypt_bits, num_trials);
+    PrintStageText("pack_bits", metrics.pack_bits, num_trials);
+    PrintStageText("lwe_keyswitch", metrics.lwe_keyswitch, num_trials);
+    PrintStageText("modswitch_in", metrics.modswitch_in, num_trials);
+    PrintStageText("accum_p", metrics.accum_p, num_trials);
+    PrintStageText("accum_q", metrics.accum_q, num_trials);
+    PrintStageText("expcrt", metrics.expcrt, num_trials);
+    PrintStageText("fun_extract", metrics.fun_extract, num_trials);
+    PrintStageText("modswitch_out", metrics.modswitch_out, num_trials);
+    PrintStageText("decode_and_check", metrics.decode_and_check, num_trials);
+    PrintStageText("total", metrics.total, num_trials);
+}
+
+void PrintStageJson(const char *name, const StageStats &stats, bool has_trailing_comma) {
+    std::cout << "    \"" << name << "\":{"
+              << "\"ms\":" << stats.ms << ","
+              << "\"forward_ntt\":" << stats.forward_ntt << ","
+              << "\"inverse_ntt\":" << stats.inverse_ntt << ","
+              << "\"galois\":" << stats.galois << ","
+              << "\"keyswitch\":" << stats.keyswitch << ","
+              << "\"extmult\":" << stats.extmult << ","
+              << "\"trace_calls\":" << stats.trace_calls << ","
+              << "\"approx_bytes\":" << stats.approx_bytes << "}";
+    if (has_trailing_comma) {
+        std::cout << ",";
+    }
+    std::cout << std::endl;
+}
+
 template <typename Params>
-void PrintJson(const ExperimentConfig &config, bool dim_reduction_enabled, bool dim_reduction_active, const std::vector<TrialResult> &trials) {
+void PrintJson(
+    const ExperimentConfig &config,
+    bool dim_reduction_enabled,
+    bool dim_reduction_active,
+    const std::vector<BootstrapResult> &trials,
+    const BootstrapMetrics &metrics) {
     size_t pass = 0;
     size_t fail = 0;
     for (const auto &trial : trials) {
@@ -299,129 +318,54 @@ void PrintJson(const ExperimentConfig &config, bool dim_reduction_enabled, bool 
         std::cout << std::endl;
     }
     std::cout << "  ]," << std::endl;
+    std::cout << "  \"stage_metrics\":{" << std::endl;
+    PrintStageJson("encrypt_bits", metrics.encrypt_bits, true);
+    PrintStageJson("pack_bits", metrics.pack_bits, true);
+    PrintStageJson("lwe_keyswitch", metrics.lwe_keyswitch, true);
+    PrintStageJson("modswitch_in", metrics.modswitch_in, true);
+    PrintStageJson("accum_p", metrics.accum_p, true);
+    PrintStageJson("accum_q", metrics.accum_q, true);
+    PrintStageJson("expcrt", metrics.expcrt, true);
+    PrintStageJson("fun_extract", metrics.fun_extract, true);
+    PrintStageJson("modswitch_out", metrics.modswitch_out, true);
+    PrintStageJson("decode_and_check", metrics.decode_and_check, true);
+    PrintStageJson("total", metrics.total, false);
+    std::cout << "  }," << std::endl;
     std::cout << "  \"summary\":{\"pass\":" << pass << ",\"fail\":" << fail << "}" << std::endl;
     std::cout << "}" << std::endl;
 }
 
 template <typename Params>
 int RunExperiment(const ExperimentConfig &config) {
-    ExperimentConfig resolved_config = config;
-    resolved_config.profile_name = Params::kProfileName;
+    bdf17::BootstrapRunner<Params> runner(config);
+    const ExperimentConfig &resolved_config = runner.config();
 
-    const bool dim_reduction_enabled =
-        resolved_config.has_enable_lwe_dim_reduction_override
-            ? resolved_config.enable_lwe_dim_reduction_override
-            : Params::kEnableLweDimReduction;
-    const bool dim_reduction_active = dim_reduction_enabled && Params::kLweFrontendDimension != Params::kLweAccumulatorDimension;
-    bdf17::ValidateProfileOrThrow<Params>(dim_reduction_enabled, resolved_config.expcrt_variant);
+    std::vector<BootstrapResult> trials;
+    trials.reserve(resolved_config.num_trials);
 
-    const uint64_t q_frontend = Params::kFrontendModulus;
-    const uint64_t q_accumulator_input = Params::kAccumulatorInputModulus;
-    const uint64_t q_extract_internal = Params::kExtractModulus;
-    const size_t packing_width = bdf17::MaxPackingBits(Params::kPlainModulus);
-
-    bdf17::RandomContext rng(resolved_config.seed);
-    std::uniform_int_distribution<int> bit_dist(0, 1);
-
-    const std::vector<int64_t> lwe_secret_frontend =
-        GaussianSampler<Params::kLweFrontendDimension>::SampleSk(Params::kLweSecretDensity, rng.engine);
-
-    std::vector<int64_t> lwe_secret_accumulator;
-    std::optional<bdf17::LweKeySwitchKey> frontend_to_accumulator_ksk;
-    if (dim_reduction_active) {
-        lwe_secret_accumulator =
-            GaussianSampler<Params::kLweAccumulatorDimension>::SampleSk(Params::kLweSecretDensity, rng.engine);
-        frontend_to_accumulator_ksk = bdf17::GenerateLweKeySwitchKey(
-            lwe_secret_frontend,
-            lwe_secret_accumulator,
-            q_frontend,
-            Params::kLweKeySwitchBase,
-            Params::kLweNoiseVar,
-            rng.engine);
-    } else {
-        lwe_secret_accumulator = lwe_secret_frontend;
-    }
-
-    const auto plain_lut = BuildLut<Params>(resolved_config);
-    const auto lut_samples = bdf17::BuildTensorLutSamples<Params>(plain_lut);
-    const auto lut_coeff = bdf17::ConstructLutPoly<Params>(lut_samples);
-    typename Params::PlanPQ plan_pq;
-    const auto lut_eval = plan_pq.forward(lut_coeff);
-
-    bdf17::AccumulatorState<Params> accumulator(lwe_secret_accumulator, rng, Params::kRlweNoiseVar);
-    bdf17::TensorExpCrtState<Params> expcrt(
-        lwe_secret_frontend,
-        accumulator.sk_p,
-        accumulator.sk_q,
-        rng,
-        Params::kRlweNoiseVar);
-
-    std::vector<TrialResult> trials;
-    trials.reserve(config.num_trials);
+    BootstrapMetrics aggregate_metrics;
     bool has_failure = false;
-    for (size_t trial_index = 0; trial_index < config.num_trials; ++trial_index) {
-        TrialResult trial;
-        trial.trial_index = trial_index;
-
-        uint64_t packed_plain = 0;
-        std::vector<bdf17::LweCiphertext> bit_ciphertexts;
-        bit_ciphertexts.reserve(packing_width);
-        for (size_t i = 0; i < packing_width; ++i) {
-            const uint64_t bit = static_cast<uint64_t>(bit_dist(rng.engine));
-            packed_plain |= bit << i;
-            bit_ciphertexts.push_back(bdf17::EncryptLwe(
-                lwe_secret_frontend,
-                bit,
-                Params::kPlainModulus,
-                q_frontend,
-                Params::kLweNoiseVar,
-                rng.engine));
-        }
-        trial.packed_plain = packed_plain;
-        trial.bits_le = BitsLE(packed_plain, packing_width);
-
-        auto packed_frontend = bdf17::PackBitsCiphertextsLE(bit_ciphertexts, Params::kPlainModulus, q_frontend);
-        bdf17::LweCiphertext packed_for_accumulator = packed_frontend;
-        if (dim_reduction_active) {
-            packed_for_accumulator = bdf17::ApplyLweKeySwitch(packed_for_accumulator, *frontend_to_accumulator_ksk);
-        }
-
-        auto packed_internal =
-            bdf17::ModSwitchLwe(packed_for_accumulator, q_frontend, q_accumulator_input, Params::kPlainModulus);
-        std::vector<int64_t> a(Params::kLweAccumulatorDimension, 0);
-        for (size_t i = 0; i < Params::kLweAccumulatorDimension; ++i) {
-            a[i] = static_cast<int64_t>(packed_internal.a[i]);
-        }
-        int64_t b = static_cast<int64_t>(packed_internal.b);
-
-        auto ct_p = Params::SchemeP::template ModSwitch<typename Params::SchemePt>(
-            accumulator.scheme_p.Process(accumulator.bk_p, a, b, Params::kPlainModulus));
-        auto ct_q = Params::SchemeQ::template ModSwitch<typename Params::SchemeQt>(
-            accumulator.scheme_q.Process(accumulator.bk_q, a, b, Params::kPlainModulus));
-
-        auto tensor_ct = bdf17::ExpCRT<Params>(expcrt, ct_p, ct_q, resolved_config.expcrt_variant);
-        auto extracted = bdf17::FunExtract<Params>(std::move(tensor_ct), lut_eval);
-
-        bdf17::LweCiphertext extracted_internal{extracted.a, extracted.b};
-        bdf17::LweCiphertext final_frontend = extracted_internal;
-        if (q_extract_internal != q_frontend) {
-            final_frontend = bdf17::ModSwitchLwe(extracted_internal, q_extract_internal, q_frontend, Params::kPlainModulus);
-        }
-
-        trial.phase = bdf17::DecryptPhase(final_frontend, lwe_secret_frontend, q_frontend);
-        trial.got = static_cast<size_t>(bdf17::DecodeMessage(trial.phase, Params::kPlainModulus, q_frontend));
-        trial.expected = plain_lut[packed_plain];
-        trial.ok = trial.got == trial.expected;
+    for (size_t trial_index = 0; trial_index < resolved_config.num_trials; ++trial_index) {
+        BootstrapMetrics trial_metrics;
+        BootstrapResult trial = runner.RunTrial({trial_index}, &trial_metrics);
+        bdf17::MergeBootstrapMetrics(aggregate_metrics, trial_metrics);
         has_failure = has_failure || !trial.ok;
         trials.push_back(std::move(trial));
     }
 
     if (resolved_config.emit_json) {
-        PrintJson<Params>(resolved_config, dim_reduction_enabled, dim_reduction_active, trials);
+        PrintJson<Params>(
+            resolved_config,
+            runner.dim_reduction_enabled(),
+            runner.dim_reduction_active(),
+            trials,
+            aggregate_metrics);
     } else {
-        PrintConfigText<Params>(resolved_config, dim_reduction_enabled, dim_reduction_active);
+        PrintConfigText<Params>(resolved_config, runner.dim_reduction_enabled(), runner.dim_reduction_active());
         PrintTrialsText(trials);
+        PrintMetricsText(aggregate_metrics, trials.size());
     }
+
     return has_failure ? 1 : 0;
 }
 
