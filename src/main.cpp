@@ -188,25 +188,12 @@ ExperimentConfig ParseExperimentConfig(const int argc, char **argv) {
     return config;
 }
 
-template <typename Params>
 void ValidateExperimentConfig(const ExperimentConfig &config) {
     if (config.num_trials == 0) {
         throw std::runtime_error("--trials must be greater than zero");
     }
-    if (config.profile_name != "default" && config.profile_name != "smooth-ntt-1153x1297") {
-        throw std::runtime_error("unsupported --profile value: " + config.profile_name);
-    }
-    if (config.expcrt_variant == bdf17::ExpCrtVariant::Paper) {
-        throw std::runtime_error("unsupported --expcrt-variant value: paper (not implemented in this build)");
-    }
     if (config.lut_name != "lowbit" && config.lut_name != "parity") {
         throw std::runtime_error("unsupported --lut value: " + config.lut_name);
-    }
-
-    const bool dim_reduction_enabled =
-        config.has_enable_lwe_dim_reduction_override ? config.enable_lwe_dim_reduction_override : Params::kEnableLweDimReduction;
-    if (!dim_reduction_enabled && Params::kLweFrontendDimension != Params::kLweAccumulatorDimension) {
-        throw std::runtime_error("frontend/accumulator dimensions differ while dimension reduction is disabled");
     }
 }
 
@@ -229,15 +216,22 @@ template <typename Params>
 void PrintConfigText(const ExperimentConfig &config, bool dim_reduction_enabled, bool dim_reduction_active) {
     std::cout << "resolved_config" << std::endl;
     std::cout << "  profile=" << config.profile_name << std::endl;
+    std::cout << "  profile_intent=" << bdf17::ProfileIntentName(Params::kProfileIntent) << std::endl;
     std::cout << "  expcrt_variant=" << VariantName(config.expcrt_variant) << std::endl;
     std::cout << "  lut=" << config.lut_name << std::endl;
     std::cout << "  seed=" << config.seed << std::endl;
     std::cout << "  trials=" << config.num_trials << std::endl;
+    std::cout << "  p_degree=" << Params::EvalP::N << std::endl;
+    std::cout << "  q_degree=" << Params::EvalQ::N << std::endl;
+    std::cout << "  tensor_dimension=" << Params::kTensorDimension << std::endl;
     std::cout << "  plain_modulus=" << Params::kPlainModulus << std::endl;
     std::cout << "  lwe_frontend_dim=" << Params::kLweFrontendDimension << std::endl;
     std::cout << "  lwe_accumulator_dim=" << Params::kLweAccumulatorDimension << std::endl;
     std::cout << "  lwe_noise_var=" << Params::kLweNoiseVar << std::endl;
     std::cout << "  rlwe_noise_var=" << Params::kRlweNoiseVar << std::endl;
+    std::cout << "  q_frontend=" << Params::kFrontendModulus << std::endl;
+    std::cout << "  q_accumulator_input=" << Params::kAccumulatorInputModulus << std::endl;
+    std::cout << "  q_extract_internal=" << Params::kExtractModulus << std::endl;
     std::cout << "  dim_reduction_enabled=" << (dim_reduction_enabled ? "true" : "false") << std::endl;
     std::cout << "  dim_reduction_active=" << (dim_reduction_active ? "true" : "false") << std::endl;
     std::cout << std::endl;
@@ -274,15 +268,22 @@ void PrintJson(const ExperimentConfig &config, bool dim_reduction_enabled, bool 
 
     std::cout << "{" << std::endl;
     std::cout << "  \"profile\":\"" << config.profile_name << "\"," << std::endl;
+    std::cout << "  \"profile_intent\":\"" << bdf17::ProfileIntentName(Params::kProfileIntent) << "\"," << std::endl;
     std::cout << "  \"expcrt_variant\":\"" << VariantName(config.expcrt_variant) << "\"," << std::endl;
     std::cout << "  \"lut\":\"" << config.lut_name << "\"," << std::endl;
     std::cout << "  \"seed\":" << config.seed << "," << std::endl;
     std::cout << "  \"trials\":" << config.num_trials << "," << std::endl;
+    std::cout << "  \"p_degree\":" << Params::EvalP::N << "," << std::endl;
+    std::cout << "  \"q_degree\":" << Params::EvalQ::N << "," << std::endl;
+    std::cout << "  \"tensor_dimension\":" << Params::kTensorDimension << "," << std::endl;
     std::cout << "  \"plain_modulus\":" << Params::kPlainModulus << "," << std::endl;
     std::cout << "  \"lwe_frontend_dim\":" << Params::kLweFrontendDimension << "," << std::endl;
     std::cout << "  \"lwe_accumulator_dim\":" << Params::kLweAccumulatorDimension << "," << std::endl;
     std::cout << "  \"lwe_noise_var\":" << Params::kLweNoiseVar << "," << std::endl;
     std::cout << "  \"rlwe_noise_var\":" << Params::kRlweNoiseVar << "," << std::endl;
+    std::cout << "  \"q_frontend\":" << Params::kFrontendModulus << "," << std::endl;
+    std::cout << "  \"q_accumulator_input\":" << Params::kAccumulatorInputModulus << "," << std::endl;
+    std::cout << "  \"q_extract_internal\":" << Params::kExtractModulus << "," << std::endl;
     std::cout << "  \"dim_reduction_enabled\":" << (dim_reduction_enabled ? "true" : "false") << "," << std::endl;
     std::cout << "  \"dim_reduction_active\":" << (dim_reduction_active ? "true" : "false") << "," << std::endl;
     std::cout << "  \"trial_results\":[" << std::endl;
@@ -304,16 +305,22 @@ void PrintJson(const ExperimentConfig &config, bool dim_reduction_enabled, bool 
 
 template <typename Params>
 int RunExperiment(const ExperimentConfig &config) {
+    ExperimentConfig resolved_config = config;
+    resolved_config.profile_name = Params::kProfileName;
+
     const bool dim_reduction_enabled =
-        config.has_enable_lwe_dim_reduction_override ? config.enable_lwe_dim_reduction_override : Params::kEnableLweDimReduction;
+        resolved_config.has_enable_lwe_dim_reduction_override
+            ? resolved_config.enable_lwe_dim_reduction_override
+            : Params::kEnableLweDimReduction;
     const bool dim_reduction_active = dim_reduction_enabled && Params::kLweFrontendDimension != Params::kLweAccumulatorDimension;
+    bdf17::ValidateProfileOrThrow<Params>(dim_reduction_enabled, resolved_config.expcrt_variant);
 
     const uint64_t q_frontend = Params::kFrontendModulus;
     const uint64_t q_accumulator_input = Params::kAccumulatorInputModulus;
     const uint64_t q_extract_internal = Params::kExtractModulus;
     const size_t packing_width = bdf17::MaxPackingBits(Params::kPlainModulus);
 
-    bdf17::RandomContext rng(config.seed);
+    bdf17::RandomContext rng(resolved_config.seed);
     std::uniform_int_distribution<int> bit_dist(0, 1);
 
     const std::vector<int64_t> lwe_secret_frontend =
@@ -335,7 +342,7 @@ int RunExperiment(const ExperimentConfig &config) {
         lwe_secret_accumulator = lwe_secret_frontend;
     }
 
-    const auto plain_lut = BuildLut<Params>(config);
+    const auto plain_lut = BuildLut<Params>(resolved_config);
     const auto lut_samples = bdf17::BuildTensorLutSamples<Params>(plain_lut);
     const auto lut_coeff = bdf17::ConstructLutPoly<Params>(lut_samples);
     typename Params::PlanPQ plan_pq;
@@ -392,7 +399,7 @@ int RunExperiment(const ExperimentConfig &config) {
         auto ct_q = Params::SchemeQ::template ModSwitch<typename Params::SchemeQt>(
             accumulator.scheme_q.Process(accumulator.bk_q, a, b, Params::kPlainModulus));
 
-        auto tensor_ct = bdf17::ExpCRT<Params>(expcrt, ct_p, ct_q, config.expcrt_variant);
+        auto tensor_ct = bdf17::ExpCRT<Params>(expcrt, ct_p, ct_q, resolved_config.expcrt_variant);
         auto extracted = bdf17::FunExtract<Params>(std::move(tensor_ct), lut_eval);
 
         bdf17::LweCiphertext extracted_internal{extracted.a, extracted.b};
@@ -409,10 +416,10 @@ int RunExperiment(const ExperimentConfig &config) {
         trials.push_back(std::move(trial));
     }
 
-    if (config.emit_json) {
-        PrintJson<Params>(config, dim_reduction_enabled, dim_reduction_active, trials);
+    if (resolved_config.emit_json) {
+        PrintJson<Params>(resolved_config, dim_reduction_enabled, dim_reduction_active, trials);
     } else {
-        PrintConfigText<Params>(config, dim_reduction_enabled, dim_reduction_active);
+        PrintConfigText<Params>(resolved_config, dim_reduction_enabled, dim_reduction_active);
         PrintTrialsText(trials);
     }
     return has_failure ? 1 : 0;
@@ -421,11 +428,20 @@ int RunExperiment(const ExperimentConfig &config) {
 } // namespace
 
 int main(int argc, char **argv) {
-    using Params = bdf17::DefaultParams;
     try {
         const ExperimentConfig config = ParseExperimentConfig(argc, argv);
-        ValidateExperimentConfig<Params>(config);
-        return RunExperiment<Params>(config);
+        ValidateExperimentConfig(config);
+
+        if (config.profile_name == "default" || config.profile_name == "smooth" || config.profile_name == "smooth-ntt-1153x1297") {
+            return RunExperiment<bdf17::SmoothNtt1153x1297Profile>(config);
+        }
+        if (config.profile_name == "toy" || config.profile_name == "toy-equivalence") {
+            return RunExperiment<bdf17::ToyEquivalenceProfile>(config);
+        }
+
+        throw std::runtime_error(
+            "unsupported --profile value: " + config.profile_name +
+            " (supported: default, smooth-ntt-1153x1297, toy-equivalence)");
     } catch (const std::exception &e) {
         std::cerr << "error: " << e.what() << std::endl;
         return 1;

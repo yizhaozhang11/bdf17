@@ -7,15 +7,11 @@
 #include <vector>
 
 #include "experiment_config.hpp"
+#include "expcrt_variant.hpp"
 #include "params.hpp"
 #include "typed_poly.hpp"
 
 namespace bdf17 {
-
-enum class ExpCrtVariant : uint8_t {
-    TensorTrick,
-    Paper,
-};
 
 template <typename PolyPT, typename PolyQT>
 void Tensor(

@@ -6,9 +6,9 @@
 #include <random>
 #include <string>
 
-namespace bdf17 {
+#include "expcrt_variant.hpp"
 
-enum class ExpCrtVariant : uint8_t;
+namespace bdf17 {
 
 struct RandomContext {
     explicit RandomContext(uint64_t seed_value = 0) : engine(seed_value) {}
