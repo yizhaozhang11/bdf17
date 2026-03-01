@@ -4,6 +4,12 @@
 find_package(benchmark CONFIG QUIET)
 
 if(NOT benchmark_FOUND)
+    if(NOT BDF17_FETCH_DEPS)
+        message(FATAL_ERROR
+            "Google Benchmark not found and BDF17_FETCH_DEPS=OFF. "
+            "Install benchmark or reconfigure with -DBDF17_FETCH_DEPS=ON.")
+    endif()
+
     include(FetchContent)
 
     # Optionally, include Google Test as a dependency for Google Benchmark's testing

@@ -1,0 +1,108 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release-portable",
+      "displayName": "Release Portable",
+      "description": "Portable scalar release build with tests",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/release-portable",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BDF17_PORTABLE": "ON",
+        "BDF17_NATIVE_ARCH": "OFF",
+        "ENABLE_AVX2": "OFF",
+        "ENABLE_AVX512": "OFF",
+        "BUILD_TESTING": "ON",
+        "ENABLE_BENCHMARKS": "OFF",
+        "BDF17_FETCH_DEPS": "ON"
+      }
+    },
+    {
+      "name": "release-avx2",
+      "displayName": "Release AVX2",
+      "description": "Release build with AVX2 enabled and tests",
+      "inherits": "release-portable",
+      "binaryDir": "${sourceDir}/build/release-avx2",
+      "cacheVariables": {
+        "ENABLE_AVX2": "ON"
+      }
+    },
+    {
+      "name": "asan-debug",
+      "displayName": "ASAN UBSAN Debug",
+      "description": "Debug sanitizer build with tests",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/asan-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BDF17_PORTABLE": "ON",
+        "BDF17_NATIVE_ARCH": "OFF",
+        "ENABLE_AVX2": "OFF",
+        "ENABLE_AVX512": "OFF",
+        "BUILD_TESTING": "ON",
+        "ENABLE_BENCHMARKS": "OFF",
+        "BDF17_FETCH_DEPS": "ON",
+        "BDF17_ENABLE_ASAN": "ON",
+        "BDF17_ENABLE_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "benchmark-avx2",
+      "displayName": "Benchmark AVX2",
+      "description": "Release AVX2 benchmark build without tests",
+      "inherits": "release-avx2",
+      "binaryDir": "${sourceDir}/build/benchmark-avx2",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF",
+        "ENABLE_BENCHMARKS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release-portable",
+      "configurePreset": "release-portable"
+    },
+    {
+      "name": "release-avx2",
+      "configurePreset": "release-avx2"
+    },
+    {
+      "name": "asan-debug",
+      "configurePreset": "asan-debug"
+    },
+    {
+      "name": "benchmark-avx2",
+      "configurePreset": "benchmark-avx2"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release-portable",
+      "configurePreset": "release-portable",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-avx2",
+      "configurePreset": "release-avx2",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan-debug",
+      "configurePreset": "asan-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

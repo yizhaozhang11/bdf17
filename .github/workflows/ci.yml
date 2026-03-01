@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: portable-scalar
+            configure_preset: release-portable
+            build_preset: release-portable
+            test_preset: release-portable
+          - name: avx2
+            configure_preset: release-avx2
+            build_preset: release-avx2
+            test_preset: release-avx2
+          - name: asan-ubsan
+            configure_preset: asan-debug
+            build_preset: asan-debug
+            test_preset: asan-debug
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.configure_preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.build_preset }} -j
+
+      - name: Test
+        run: ctest --preset ${{ matrix.test_preset }}

@@ -4,6 +4,12 @@
 find_package(GTest CONFIG QUIET)
 
 if(NOT GTest_FOUND)
+    if(NOT BDF17_FETCH_DEPS)
+        message(FATAL_ERROR
+            "GTest not found and BDF17_FETCH_DEPS=OFF. "
+            "Install GTest or reconfigure with -DBDF17_FETCH_DEPS=ON.")
+    endif()
+
     include(FetchContent)
 
     FetchContent_Declare(

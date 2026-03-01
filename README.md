@@ -244,18 +244,35 @@ cmake --build build -j
 Useful options:
 
 ```bash
-- DENABLE_BENCHMARKS=ON|OFF   # default ON
-- DENABLE_AVX2=ON|OFF         # default ON
-- DENABLE_AVX512=ON|OFF       # default OFF
+- DBUILD_TESTING=ON|OFF        # default ON
+- DENABLE_BENCHMARKS=ON|OFF    # default ON
+- DBDF17_PORTABLE=ON|OFF       # default ON (portable, no -march=native)
+- DENABLE_AVX2=ON|OFF          # default OFF
+- DENABLE_AVX512=ON|OFF        # default OFF
+- DBDF17_ENABLE_OPENMP=ON|OFF  # default ON
+- DBDF17_FETCH_DEPS=ON|OFF     # default ON (controls FetchContent fallback)
+- DBDF17_ENABLE_ASAN=ON|OFF    # default OFF
+- DBDF17_ENABLE_UBSAN=ON|OFF   # default OFF
 ```
+
+### CMake presets
+
+The repo includes `CMakePresets.json` with a starter matrix:
+
+- `release-portable`
+- `release-avx2`
+- `asan-debug`
+- `benchmark-avx2`
 
 ### Dependency behavior
 
-- Tests are always enabled by the top-level `CMakeLists.txt`.
-- `tests/CMakeLists.txt` will try `find_package(GTest)` first and otherwise fall back to `FetchContent`.
-- Benchmarks are optional; if enabled, `benchmarks/CMakeLists.txt` will try `find_package(benchmark)` first and otherwise fall back to `FetchContent`.
+- Tests are controlled by `BUILD_TESTING`.
+- Benchmarks are controlled by `ENABLE_BENCHMARKS`.
+- `tests/CMakeLists.txt` tries `find_package(GTest)` first.
+- `benchmarks/CMakeLists.txt` tries `find_package(benchmark)` first.
+- If a package is not found, fallback download via `FetchContent` is allowed only when `BDF17_FETCH_DEPS=ON`.
 
-So if you do not have system-installed GTest / Google Benchmark, CMake may attempt to download them.
+So if you do not have system-installed GTest / Google Benchmark and want automatic dependency download, configure with `-DBDF17_FETCH_DEPS=ON`.
 
 ### Minimal demo-only build without CMake tests/benchmarks
 
@@ -265,10 +282,10 @@ For quick local experimentation with just `src/main.cpp`, a direct compile also 
 g++ -std=c++23 -O3 -march=native -fopenmp -Iinclude src/main.cpp -o bdf17_demo
 ```
 
-To mimic the default AVX2-enabled CMake path on an AVX2-capable machine, add:
+To mimic an AVX2-enabled CMake path on an AVX2-capable machine, add:
 
 ```bash
--DBDF17_ENABLE_AVX2=1 -mavx2
+-DENABLE_AVX2=ON -mavx2
 ```
 
 ---
