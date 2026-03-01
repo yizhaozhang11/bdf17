@@ -11,8 +11,15 @@
 #include <immintrin.h>
 #endif
 
+#include "detail/simd_mod_arith.hpp"
 #include "ntt_backend.hpp"
 #include "zp.h"
+
+template <size_t N_>
+struct ConstMulTable {
+    std::array<uint64_t, N_> value{};
+    std::array<uint64_t, N_> shoup{};
+};
 
 template <uint64_t p_, uint64_t g_, size_t O_, size_t w_>
 class NTT {
@@ -113,19 +120,19 @@ public:
         return y;
     }
 
-    constexpr static std::array<uint64_t, N> PrecomputeBitReverseTable() {
-        std::array<uint64_t, N> bit_reverse_table_{};
+    constexpr static std::array<uint64_t, N> PrecomputeDigitReverseTable() {
+        std::array<uint64_t, N> digit_reverse_table_{};
         for (size_t i = 0; i < V; i++) {
             for (size_t j = 0; j < U; j++) {
-                bit_reverse_table_[i * U + j] = BitReverse(j, u, 2) * V + BitReverse(i, v, 3);
+                digit_reverse_table_[i * U + j] = BitReverse(j, u, 2) * V + BitReverse(i, v, 3);
             }
         }
-        return bit_reverse_table_;
+        return digit_reverse_table_;
     }
 
     constexpr static std::array<size_t, N> gi = PrecomputeGi();
     constexpr static std::array<size_t, O> gi_inv = PrecomputeGiInv();
-    constexpr static std::array<uint64_t, N> bit_reverse_table = PrecomputeBitReverseTable();
+    constexpr static std::array<uint64_t, N> digit_reverse_table = PrecomputeDigitReverseTable();
 
     void ForwardNTT(uint64_t a[]) {
         ForwardNTTWithBackend<Backend::Auto>(a);
@@ -150,7 +157,7 @@ public:
         ForwardMixedRadix23NTT<B>(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
-            a[i] = Z::MulFastConst(a[i], omega_O_table[i], omega_O_barrett_table[i]);
+            a[i] = Z::MulConst(a[i], {omega_o_fwd_.value[i], omega_o_fwd_.shoup[i]});
         }
 
         InverseMixedRadix23NTT<B>(a, scratch);
@@ -183,7 +190,7 @@ public:
         ForwardMixedRadix23NTT<B>(scratch, a);
 
         for (size_t i = 0; i < N; i++) {
-            a[i] = Z::MulFastConst(a[i], omega_O_inv_table[i], omega_O_inv_barrett_table[i]);
+            a[i] = Z::MulConst(a[i], {omega_o_inv_.value[i], omega_o_inv_.shoup[i]});
         }
 
         InverseMixedRadix23NTT<B>(a, scratch);
@@ -198,11 +205,39 @@ public:
         return instance;
     }
 
+    template <Backend B = Backend::Scalar>
+    std::array<uint64_t, N> ComputeOmegaOTableValuesForTesting() {
+        std::array<uint64_t, N> seed{};
+        std::array<uint64_t, N> values{};
+        uint64_t t = omega_O;
+        for (size_t i = 1; i <= N; ++i) {
+            seed[(N - gi_inv[i]) % N] = t;
+            t = Z::Mul(t, omega_O);
+        }
+        ForwardMixedRadix23NTT<B>(seed.data(), values.data());
+
+        const uint64_t n_inv = Z::Pow(N, p - 2);
+        for (size_t i = 0; i < N; ++i) {
+            values[i] = Z::Mul(values[i], n_inv);
+        }
+        return values;
+    }
+
+    const ConstMulTable<N> &OmegaOForwardTableForTesting() const {
+        return omega_o_fwd_;
+    }
+
 private:
+    static inline uint64_t MulConstRaw(uint64_t a, uint64_t value, uint64_t shoup) {
+        return Z::MulConst(a, {value, shoup});
+    }
+
     // scalar kernel
-    void MixedRadix23NTTScalar(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTScalar(uint64_t __restrict__ a[], uint64_t __restrict__ b[], const ConstMulTable<N> &omega_table) {
+        const auto &omega = omega_table.value;
+        const auto &omega_shoup = omega_table.shoup;
         for (size_t i = 0; i < N; i++) {
-            b[i] = a[bit_reverse_table[i]];
+            b[i] = a[digit_reverse_table[i]];
         }
 
         for (size_t i = 0; i < N; i += 2) {
@@ -221,7 +256,7 @@ private:
             d = N >> (i + 1);
             for (size_t j = 0; j < N; j += l1) {
                 for (size_t k = 0; k < l0; k++) {
-                    uint64_t t = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
+                    uint64_t t = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
                     b[j + l0 + k] = Z::Sub(b[j + k], t);
                     b[j + k] = Z::Add(b[j + k], t);
                 }
@@ -229,9 +264,9 @@ private:
         }
 
         uint64_t z3 = omega[N / 3];
-        uint64_t z3_barrett = omega_barrett[N / 3];
+        uint64_t z3_shoup = omega_shoup[N / 3];
         uint64_t zz3 = omega[2 * N / 3];
-        uint64_t zz3_barrett = omega_barrett[2 * N / 3];
+        uint64_t zz3_shoup = omega_shoup[2 * N / 3];
 
         for (size_t i = 0; i < v; i++) {
             l0 = U;
@@ -243,10 +278,10 @@ private:
             d = N / l1;
             for (size_t j = 0; j < N; j += l1) {
                 for (size_t k = 0; k < l0; k++) {
-                    uint64_t y1 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
-                    uint64_t y2 = Z::MulFastConst(b[j + l0 + l0 + k], omega[2 * k * d], omega_barrett[2 * k * d]);
+                    uint64_t y1 = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
+                    uint64_t y2 = MulConstRaw(b[j + l0 + l0 + k], omega[2 * k * d], omega_shoup[2 * k * d]);
                     uint64_t y0 = Z::Add(y1, y2);
-                    uint64_t t = Z::Add(Z::MulFastConst(y1, z3, z3_barrett), Z::MulFastConst(y2, zz3, zz3_barrett));
+                    uint64_t t = Z::Add(MulConstRaw(y1, z3, z3_shoup), MulConstRaw(y2, zz3, zz3_shoup));
                     b[j + l0 + k] = Z::Add(b[j + k], t);
                     b[j + l0 + l0 + k] = Z::Sub(b[j + k], Z::Add(y0, t));
                     b[j + k] = Z::Add(b[j + k], y0);
@@ -258,11 +293,13 @@ private:
     }
 
 #if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
-    static_assert(p <= (1ULL << 62), "SIMD signed-compare reductions require p <= 2^62");
+    static_assert(Z::kSimdFastPathSupported, "SIMD fast path requires p <= 2^62.");
     // AVX-512 kernel
-    void MixedRadix23NTTAVX512(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTAVX512(uint64_t __restrict__ a[], uint64_t __restrict__ b[], const ConstMulTable<N> &omega_table) {
+        const auto &omega = omega_table.value;
+        const auto &omega_shoup = omega_table.shoup;
         for (size_t i = 0; i < N; ++i) {
-            b[i] = a[bit_reverse_table[i]];
+            b[i] = a[digit_reverse_table[i]];
         }
 
         for (size_t i = 0; i < N; i += 2) {
@@ -289,26 +326,21 @@ private:
                         (int64_t)omega[(k + 7) * d], (int64_t)omega[(k + 6) * d], (int64_t)omega[(k + 5) * d], (int64_t)omega[(k + 4) * d],
                         (int64_t)omega[(k + 3) * d], (int64_t)omega[(k + 2) * d], (int64_t)omega[(k + 1) * d], (int64_t)omega[(k + 0) * d]);
                     const __m512i omegaMuV = _mm512_set_epi64(
-                        (int64_t)omega_barrett[(k + 7) * d], (int64_t)omega_barrett[(k + 6) * d], (int64_t)omega_barrett[(k + 5) * d], (int64_t)omega_barrett[(k + 4) * d],
-                        (int64_t)omega_barrett[(k + 3) * d], (int64_t)omega_barrett[(k + 2) * d], (int64_t)omega_barrett[(k + 1) * d], (int64_t)omega_barrett[(k + 0) * d]);
+                        (int64_t)omega_shoup[(k + 7) * d], (int64_t)omega_shoup[(k + 6) * d], (int64_t)omega_shoup[(k + 5) * d], (int64_t)omega_shoup[(k + 4) * d],
+                        (int64_t)omega_shoup[(k + 3) * d], (int64_t)omega_shoup[(k + 2) * d], (int64_t)omega_shoup[(k + 1) * d], (int64_t)omega_shoup[(k + 0) * d]);
 
                     const __m512i bl0V = _mm512_loadu_si512((const void *)&b[j + l0 + k]);
-                    const __m512i tV = Z::MulConst512(bl0V, omegaV, omegaMuV);
+                    const __m512i tV = bdf17::detail::simd::MulConstU64x8<Z>(bl0V, omegaV, omegaMuV);
                     const __m512i bV = _mm512_loadu_si512((const void *)&b[j + k]);
 
-                    __m512i addV = _mm512_add_epi64(bV, tV);
-                    const __mmask8 addMask = _mm512_cmpgt_epi64_mask(addV, p_1V);
-                    addV = _mm512_mask_sub_epi64(addV, addMask, addV, pV);
-
-                    __m512i subV = _mm512_sub_epi64(bV, tV);
-                    const __mmask8 subMask = _mm512_cmpgt_epi64_mask(tV, bV);
-                    subV = _mm512_mask_add_epi64(subV, subMask, subV, pV);
+                    const __m512i addV = bdf17::detail::simd::AddModU64x8(bV, tV, pV, p_1V);
+                    const __m512i subV = bdf17::detail::simd::SubModU64x8(bV, tV, pV);
 
                     _mm512_storeu_si512((void *)&b[j + k], addV);
                     _mm512_storeu_si512((void *)&b[j + l0 + k], subV);
                 }
                 for (; k < l0; ++k) {
-                    const uint64_t t = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
+                    const uint64_t t = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
                     b[j + l0 + k] = Z::Sub(b[j + k], t);
                     b[j + k] = Z::Add(b[j + k], t);
                 }
@@ -316,13 +348,13 @@ private:
         }
 
         const uint64_t z3 = omega[N / 3];
-        const uint64_t z3_barrett = omega_barrett[N / 3];
+        const uint64_t z3_shoup = omega_shoup[N / 3];
         const uint64_t zz3 = omega[2 * N / 3];
-        const uint64_t zz3_barrett = omega_barrett[2 * N / 3];
+        const uint64_t zz3_shoup = omega_shoup[2 * N / 3];
         const __m512i z3V = _mm512_set1_epi64((int64_t)z3);
-        const __m512i z3MuV = _mm512_set1_epi64((int64_t)z3_barrett);
+        const __m512i z3MuV = _mm512_set1_epi64((int64_t)z3_shoup);
         const __m512i zz3V = _mm512_set1_epi64((int64_t)zz3);
-        const __m512i zz3MuV = _mm512_set1_epi64((int64_t)zz3_barrett);
+        const __m512i zz3MuV = _mm512_set1_epi64((int64_t)zz3_shoup);
 
         for (size_t i = 0; i < v; ++i) {
             l0 = U;
@@ -339,60 +371,47 @@ private:
                         (int64_t)omega[(k + 7) * d], (int64_t)omega[(k + 6) * d], (int64_t)omega[(k + 5) * d], (int64_t)omega[(k + 4) * d],
                         (int64_t)omega[(k + 3) * d], (int64_t)omega[(k + 2) * d], (int64_t)omega[(k + 1) * d], (int64_t)omega[(k + 0) * d]);
                     const __m512i omegaMuV = _mm512_set_epi64(
-                        (int64_t)omega_barrett[(k + 7) * d], (int64_t)omega_barrett[(k + 6) * d], (int64_t)omega_barrett[(k + 5) * d], (int64_t)omega_barrett[(k + 4) * d],
-                        (int64_t)omega_barrett[(k + 3) * d], (int64_t)omega_barrett[(k + 2) * d], (int64_t)omega_barrett[(k + 1) * d], (int64_t)omega_barrett[(k + 0) * d]);
+                        (int64_t)omega_shoup[(k + 7) * d], (int64_t)omega_shoup[(k + 6) * d], (int64_t)omega_shoup[(k + 5) * d], (int64_t)omega_shoup[(k + 4) * d],
+                        (int64_t)omega_shoup[(k + 3) * d], (int64_t)omega_shoup[(k + 2) * d], (int64_t)omega_shoup[(k + 1) * d], (int64_t)omega_shoup[(k + 0) * d]);
                     const __m512i omega2V = _mm512_set_epi64(
                         (int64_t)omega[2 * (k + 7) * d], (int64_t)omega[2 * (k + 6) * d], (int64_t)omega[2 * (k + 5) * d], (int64_t)omega[2 * (k + 4) * d],
                         (int64_t)omega[2 * (k + 3) * d], (int64_t)omega[2 * (k + 2) * d], (int64_t)omega[2 * (k + 1) * d], (int64_t)omega[2 * (k + 0) * d]);
                     const __m512i omega2MuV = _mm512_set_epi64(
-                        (int64_t)omega_barrett[2 * (k + 7) * d], (int64_t)omega_barrett[2 * (k + 6) * d], (int64_t)omega_barrett[2 * (k + 5) * d], (int64_t)omega_barrett[2 * (k + 4) * d],
-                        (int64_t)omega_barrett[2 * (k + 3) * d], (int64_t)omega_barrett[2 * (k + 2) * d], (int64_t)omega_barrett[2 * (k + 1) * d], (int64_t)omega_barrett[2 * (k + 0) * d]);
+                        (int64_t)omega_shoup[2 * (k + 7) * d], (int64_t)omega_shoup[2 * (k + 6) * d], (int64_t)omega_shoup[2 * (k + 5) * d], (int64_t)omega_shoup[2 * (k + 4) * d],
+                        (int64_t)omega_shoup[2 * (k + 3) * d], (int64_t)omega_shoup[2 * (k + 2) * d], (int64_t)omega_shoup[2 * (k + 1) * d], (int64_t)omega_shoup[2 * (k + 0) * d]);
 
                     const __m512i b1V = _mm512_loadu_si512((const void *)&b[j + l0 + k]);
                     const __m512i b2V = _mm512_loadu_si512((const void *)&b[j + l0 + l0 + k]);
 
-                    const __m512i y1V = Z::MulConst512(b1V, omegaV, omegaMuV);
-                    const __m512i y2V = Z::MulConst512(b2V, omega2V, omega2MuV);
+                    const __m512i y1V = bdf17::detail::simd::MulConstU64x8<Z>(b1V, omegaV, omegaMuV);
+                    const __m512i y2V = bdf17::detail::simd::MulConstU64x8<Z>(b2V, omega2V, omega2MuV);
 
-                    __m512i y0V = _mm512_add_epi64(y1V, y2V);
-                    const __mmask8 y0Mask = _mm512_cmpgt_epi64_mask(y0V, p_1V);
-                    y0V = _mm512_mask_sub_epi64(y0V, y0Mask, y0V, pV);
+                    const __m512i y0V = bdf17::detail::simd::AddModU64x8(y1V, y2V, pV, p_1V);
 
                     __m512i tV = _mm512_add_epi64(
-                        Z::MulConst512(y1V, z3V, z3MuV),
-                        Z::MulConst512(y2V, zz3V, zz3MuV));
-                    const __mmask8 tMask = _mm512_cmpgt_epi64_mask(tV, p_1V);
-                    tV = _mm512_mask_sub_epi64(tV, tMask, tV, pV);
+                        bdf17::detail::simd::MulConstU64x8<Z>(y1V, z3V, z3MuV),
+                        bdf17::detail::simd::MulConstU64x8<Z>(y2V, zz3V, zz3MuV));
+                    tV = bdf17::detail::simd::ReduceOnceU64x8(tV, pV, p_1V);
 
-                    __m512i ytV = _mm512_add_epi64(y0V, tV);
-                    const __mmask8 ytMask = _mm512_cmpgt_epi64_mask(ytV, p_1V);
-                    ytV = _mm512_mask_sub_epi64(ytV, ytMask, ytV, pV);
+                    const __m512i ytV = bdf17::detail::simd::AddModU64x8(y0V, tV, pV, p_1V);
 
                     const __m512i b0V = _mm512_loadu_si512((const void *)&b[j + k]);
 
-                    __m512i addV = _mm512_add_epi64(b0V, tV);
-                    const __mmask8 addMask = _mm512_cmpgt_epi64_mask(addV, p_1V);
-                    addV = _mm512_mask_sub_epi64(addV, addMask, addV, pV);
-
-                    __m512i subV = _mm512_sub_epi64(b0V, ytV);
-                    const __mmask8 subMask = _mm512_cmpgt_epi64_mask(ytV, b0V);
-                    subV = _mm512_mask_add_epi64(subV, subMask, subV, pV);
-
-                    __m512i bNewV = _mm512_add_epi64(b0V, y0V);
-                    const __mmask8 bMask = _mm512_cmpgt_epi64_mask(bNewV, p_1V);
-                    bNewV = _mm512_mask_sub_epi64(bNewV, bMask, bNewV, pV);
+                    const __m512i addV = bdf17::detail::simd::AddModU64x8(b0V, tV, pV, p_1V);
+                    const __m512i subV = bdf17::detail::simd::SubModU64x8(b0V, ytV, pV);
+                    const __m512i bNewV = bdf17::detail::simd::AddModU64x8(b0V, y0V, pV, p_1V);
 
                     _mm512_storeu_si512((void *)&b[j + l0 + k], addV);
                     _mm512_storeu_si512((void *)&b[j + l0 + l0 + k], subV);
                     _mm512_storeu_si512((void *)&b[j + k], bNewV);
                 }
                 for (; k < l0; ++k) {
-                    const uint64_t y1 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
-                    const uint64_t y2 = Z::MulFastConst(b[j + l0 + l0 + k], omega[2 * k * d], omega_barrett[2 * k * d]);
+                    const uint64_t y1 = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
+                    const uint64_t y2 = MulConstRaw(b[j + l0 + l0 + k], omega[2 * k * d], omega_shoup[2 * k * d]);
                     const uint64_t y0 = Z::Add(y1, y2);
                     const uint64_t t = Z::Add(
-                        Z::MulFastConst(y1, z3, z3_barrett),
-                        Z::MulFastConst(y2, zz3, zz3_barrett));
+                        MulConstRaw(y1, z3, z3_shoup),
+                        MulConstRaw(y2, zz3, zz3_shoup));
                     b[j + l0 + k] = Z::Add(b[j + k], t);
                     b[j + l0 + l0 + k] = Z::Sub(b[j + k], Z::Add(y0, t));
                     b[j + k] = Z::Add(b[j + k], y0);
@@ -405,11 +424,13 @@ private:
 #endif
 
 #if defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
-    static_assert(p <= (1ULL << 62), "SIMD signed-compare reductions require p <= 2^62");
+    static_assert(Z::kSimdFastPathSupported, "SIMD fast path requires p <= 2^62.");
     // AVX2 kernel
-    void MixedRadix23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTAVX2(uint64_t __restrict__ a[], uint64_t __restrict__ b[], const ConstMulTable<N> &omega_table) {
+        const auto &omega = omega_table.value;
+        const auto &omega_shoup = omega_table.shoup;
         for (size_t i = 0; i < N; i++) {
-            b[i] = a[bit_reverse_table[i]];
+            b[i] = a[digit_reverse_table[i]];
         }
 
         for (size_t i = 0; i < N; i += 2) {
@@ -432,10 +453,10 @@ private:
             for (size_t j = 0; j < N; j += l1) {
                 size_t k = 0;
                 for (; k + 3 < l0; k += 4) {
-                    uint64_t t0 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
-                    uint64_t t1 = Z::MulFastConst(b[j + l0 + k + 1], omega[(k + 1) * d], omega_barrett[(k + 1) * d]);
-                    uint64_t t2 = Z::MulFastConst(b[j + l0 + k + 2], omega[(k + 2) * d], omega_barrett[(k + 2) * d]);
-                    uint64_t t3 = Z::MulFastConst(b[j + l0 + k + 3], omega[(k + 3) * d], omega_barrett[(k + 3) * d]);
+                    uint64_t t0 = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
+                    uint64_t t1 = MulConstRaw(b[j + l0 + k + 1], omega[(k + 1) * d], omega_shoup[(k + 1) * d]);
+                    uint64_t t2 = MulConstRaw(b[j + l0 + k + 2], omega[(k + 2) * d], omega_shoup[(k + 2) * d]);
+                    uint64_t t3 = MulConstRaw(b[j + l0 + k + 3], omega[(k + 3) * d], omega_shoup[(k + 3) * d]);
 
                     __m256i tV = _mm256_set_epi64x(t3, t2, t1, t0);
                     __m256i bV = _mm256_loadu_si256((__m256i *)&b[j + k]);
@@ -451,7 +472,7 @@ private:
                     _mm256_storeu_si256((__m256i *)&b[j + l0 + k], sub_adjustV);
                 }
                 for (; k < l0; k++) {
-                    uint64_t t = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
+                    uint64_t t = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
                     b[j + l0 + k] = Z::Sub(b[j + k], t);
                     b[j + k] = Z::Add(b[j + k], t);
                 }
@@ -459,9 +480,9 @@ private:
         }
 
         uint64_t z3 = omega[N / 3];
-        uint64_t z3_barrett = omega_barrett[N / 3];
+        uint64_t z3_shoup = omega_shoup[N / 3];
         uint64_t zz3 = omega[2 * N / 3];
-        uint64_t zz3_barrett = omega_barrett[2 * N / 3];
+        uint64_t zz3_shoup = omega_shoup[2 * N / 3];
 
         for (size_t i = 0; i < v; i++) {
             l0 = U;
@@ -474,22 +495,22 @@ private:
             for (size_t j = 0; j < N; j += l1) {
                 size_t k = 0;
                 for (; k + 3 < l0; k += 4) {
-                    uint64_t y01 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
-                    uint64_t y02 = Z::MulFastConst(b[j + l0 + l0 + k], omega[2 * k * d], omega_barrett[2 * k * d]);
-                    uint64_t y11 = Z::MulFastConst(b[j + l0 + k + 1], omega[(k + 1) * d], omega_barrett[(k + 1) * d]);
-                    uint64_t y12 = Z::MulFastConst(b[j + l0 + l0 + k + 1], omega[2 * (k + 1) * d], omega_barrett[2 * (k + 1) * d]);
-                    uint64_t y21 = Z::MulFastConst(b[j + l0 + k + 2], omega[(k + 2) * d], omega_barrett[(k + 2) * d]);
-                    uint64_t y22 = Z::MulFastConst(b[j + l0 + l0 + k + 2], omega[2 * (k + 2) * d], omega_barrett[2 * (k + 2) * d]);
-                    uint64_t y31 = Z::MulFastConst(b[j + l0 + k + 3], omega[(k + 3) * d], omega_barrett[(k + 3) * d]);
-                    uint64_t y32 = Z::MulFastConst(b[j + l0 + l0 + k + 3], omega[2 * (k + 3) * d], omega_barrett[2 * (k + 3) * d]);
+                    uint64_t y01 = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
+                    uint64_t y02 = MulConstRaw(b[j + l0 + l0 + k], omega[2 * k * d], omega_shoup[2 * k * d]);
+                    uint64_t y11 = MulConstRaw(b[j + l0 + k + 1], omega[(k + 1) * d], omega_shoup[(k + 1) * d]);
+                    uint64_t y12 = MulConstRaw(b[j + l0 + l0 + k + 1], omega[2 * (k + 1) * d], omega_shoup[2 * (k + 1) * d]);
+                    uint64_t y21 = MulConstRaw(b[j + l0 + k + 2], omega[(k + 2) * d], omega_shoup[(k + 2) * d]);
+                    uint64_t y22 = MulConstRaw(b[j + l0 + l0 + k + 2], omega[2 * (k + 2) * d], omega_shoup[2 * (k + 2) * d]);
+                    uint64_t y31 = MulConstRaw(b[j + l0 + k + 3], omega[(k + 3) * d], omega_shoup[(k + 3) * d]);
+                    uint64_t y32 = MulConstRaw(b[j + l0 + l0 + k + 3], omega[2 * (k + 3) * d], omega_shoup[2 * (k + 3) * d]);
                     uint64_t y00 = y01 + y02;
                     uint64_t y10 = y11 + y12;
                     uint64_t y20 = y21 + y22;
                     uint64_t y30 = y31 + y32;
-                    uint64_t t0 = Z::MulFastConst(y01, z3, z3_barrett) + Z::MulFastConst(y02, zz3, zz3_barrett);
-                    uint64_t t1 = Z::MulFastConst(y11, z3, z3_barrett) + Z::MulFastConst(y12, zz3, zz3_barrett);
-                    uint64_t t2 = Z::MulFastConst(y21, z3, z3_barrett) + Z::MulFastConst(y22, zz3, zz3_barrett);
-                    uint64_t t3 = Z::MulFastConst(y31, z3, z3_barrett) + Z::MulFastConst(y32, zz3, zz3_barrett);
+                    uint64_t t0 = MulConstRaw(y01, z3, z3_shoup) + MulConstRaw(y02, zz3, zz3_shoup);
+                    uint64_t t1 = MulConstRaw(y11, z3, z3_shoup) + MulConstRaw(y12, zz3, zz3_shoup);
+                    uint64_t t2 = MulConstRaw(y21, z3, z3_shoup) + MulConstRaw(y22, zz3, zz3_shoup);
+                    uint64_t t3 = MulConstRaw(y31, z3, z3_shoup) + MulConstRaw(y32, zz3, zz3_shoup);
 
                     __m256i tV = _mm256_set_epi64x(t3, t2, t1, t0);
                     __m256i t_maskV = _mm256_cmpgt_epi64(tV, p_1V);
@@ -521,10 +542,10 @@ private:
                     _mm256_storeu_si256((__m256i *)&b[j + k], b0_adjustV);
                 }
                 for (; k < l0; k++) {
-                    uint64_t y1 = Z::MulFastConst(b[j + l0 + k], omega[k * d], omega_barrett[k * d]);
-                    uint64_t y2 = Z::MulFastConst(b[j + l0 + l0 + k], omega[2 * k * d], omega_barrett[2 * k * d]);
+                    uint64_t y1 = MulConstRaw(b[j + l0 + k], omega[k * d], omega_shoup[k * d]);
+                    uint64_t y2 = MulConstRaw(b[j + l0 + l0 + k], omega[2 * k * d], omega_shoup[2 * k * d]);
                     uint64_t y0 = Z::Add(y1, y2);
-                    uint64_t t = Z::Add(Z::MulFastConst(y1, z3, z3_barrett), Z::MulFastConst(y2, zz3, zz3_barrett));
+                    uint64_t t = Z::Add(MulConstRaw(y1, z3, z3_shoup), MulConstRaw(y2, zz3, zz3_shoup));
                     b[j + l0 + k] = Z::Add(b[j + k], t);
                     b[j + l0 + l0 + k] = Z::Sub(b[j + k], Z::Add(y0, t));
                     b[j + k] = Z::Add(b[j + k], y0);
@@ -536,36 +557,36 @@ private:
     }
 #endif
 
-    void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
-        MixedRadix23NTTWithBackend<Backend::Auto>(a, b, omega, omega_barrett);
+    void MixedRadix23NTT(uint64_t __restrict__ a[], uint64_t __restrict__ b[], const ConstMulTable<N> &omega_table) {
+        MixedRadix23NTTWithBackend<Backend::Auto>(a, b, omega_table);
     }
 
     template <Backend B = Backend::Auto>
-    void MixedRadix23NTTWithBackend(uint64_t __restrict__ a[], uint64_t __restrict__ b[], uint64_t __restrict__ omega[], uint64_t __restrict__ omega_barrett[]) {
+    void MixedRadix23NTTWithBackend(uint64_t __restrict__ a[], uint64_t __restrict__ b[], const ConstMulTable<N> &omega_table) {
         static_assert(N >= 2, "MixedRadix23 NTT kernel requires N >= 2 (equivalently O >= 3)");
         if constexpr (B == Backend::Scalar) {
-            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+            MixedRadix23NTTScalar(a, b, omega_table);
         } else if constexpr (B == Backend::Avx512) {
 #if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
-            MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX512(a, b, omega_table);
 #elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
-            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX2(a, b, omega_table);
 #else
-            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+            MixedRadix23NTTScalar(a, b, omega_table);
 #endif
         } else if constexpr (B == Backend::Avx2) {
 #if defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
-            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX2(a, b, omega_table);
 #else
-            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+            MixedRadix23NTTScalar(a, b, omega_table);
 #endif
         } else {
 #if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
-            MixedRadix23NTTAVX512(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX512(a, b, omega_table);
 #elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
-            MixedRadix23NTTAVX2(a, b, omega, omega_barrett);
+            MixedRadix23NTTAVX2(a, b, omega_table);
 #else
-            MixedRadix23NTTScalar(a, b, omega, omega_barrett);
+            MixedRadix23NTTScalar(a, b, omega_table);
 #endif
         }
     }
@@ -576,7 +597,7 @@ private:
 
     template <Backend B = Backend::Auto>
     void ForwardMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
-        MixedRadix23NTTWithBackend<B>(a, b, omega_N_table, omega_N_barrett_table);
+        MixedRadix23NTTWithBackend<B>(a, b, omega_n_fwd_);
     }
 
     void InverseMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
@@ -585,56 +606,89 @@ private:
 
     template <Backend B = Backend::Auto>
     void InverseMixedRadix23NTT(uint64_t a[], uint64_t b[]) {
-        MixedRadix23NTTWithBackend<B>(a, b, omega_N_inv_table, omega_N_inv_barrett_table);
+        MixedRadix23NTTWithBackend<B>(a, b, omega_n_inv_);
     }
 
     void ComputeOmegaNTable() {
-        omega_N_table[0] = 1;
+        omega_n_fwd_.value[0] = 1;
         for (size_t i = 1; i < N; i++) {
-            omega_N_table[i] = Z::Mul(omega_N_table[i - 1], omega_N);
+            omega_n_fwd_.value[i] = Z::Mul(omega_n_fwd_.value[i - 1], omega_N);
         }
-        omega_N_inv_table[0] = 1;
+        omega_n_inv_.value[0] = 1;
         for (size_t i = 1; i < N; i++) {
-            omega_N_inv_table[i] = omega_N_table[N - i];
+            omega_n_inv_.value[i] = omega_n_fwd_.value[N - i];
         }
         for (size_t i = 0; i < N; i++) {
-            omega_N_barrett_table[i] = Z::ComputeBarrettFactor(omega_N_table[i]);
-            omega_N_inv_barrett_table[i] = Z::ComputeBarrettFactor(omega_N_inv_table[i]);
+            omega_n_fwd_.shoup[i] = Z::MakeConstMultiplier(omega_n_fwd_.value[i]).shoup;
+            omega_n_inv_.shoup[i] = Z::MakeConstMultiplier(omega_n_inv_.value[i]).shoup;
         }
     }
 
     void ComputeOmegaOTable() {
+        std::array<uint64_t, N> seed{};
         uint64_t t = omega_O;
         for (size_t i = 1; i <= N; i++) {
-            omega_O_barrett_table[(N - gi_inv[i]) % N] = t;
+            seed[(N - gi_inv[i]) % N] = t;
             t = Z::Mul(t, omega_O);
         }
-        ForwardMixedRadix23NTT(omega_O_barrett_table, omega_O_table);
+        ForwardMixedRadix23NTT<Backend::Scalar>(seed.data(), omega_o_fwd_.value.data());
 
         uint64_t N_inv = Z::Pow(N, p - 2);
         for (size_t i = 0; i < N; i++) {
-            omega_O_inv_table[i] = Z::Pow(omega_O_table[i], p - 2);
-            omega_O_table[i] = Z::Mul(omega_O_table[i], N_inv);
-            omega_O_inv_table[i] = Z::Mul(omega_O_inv_table[i], N_inv);
-            omega_O_barrett_table[i] = Z::ComputeBarrettFactor(omega_O_table[i]);
-            omega_O_inv_barrett_table[i] = Z::ComputeBarrettFactor(omega_O_inv_table[i]);
+            omega_o_inv_.value[i] = Z::Pow(omega_o_fwd_.value[i], p - 2);
+            omega_o_fwd_.value[i] = Z::Mul(omega_o_fwd_.value[i], N_inv);
+            omega_o_inv_.value[i] = Z::Mul(omega_o_inv_.value[i], N_inv);
+            omega_o_fwd_.shoup[i] = Z::MakeConstMultiplier(omega_o_fwd_.value[i]).shoup;
+            omega_o_inv_.shoup[i] = Z::MakeConstMultiplier(omega_o_inv_.value[i]).shoup;
         }
     }
 
+    [[nodiscard]] bool ValidateParams() const {
+        if (N != U * V) {
+            return false;
+        }
+        if (Z::Pow(omega_O, O) != 1) {
+            return false;
+        }
+        if (Z::Pow(omega_N, N) != 1) {
+            return false;
+        }
+        for (size_t i = 1; i <= N; ++i) {
+            if (gi_inv[i] >= N) {
+                return false;
+            }
+            if (gi[gi_inv[i]] != i) {
+                return false;
+            }
+        }
+        std::array<bool, N + 1> seen{};
+        for (size_t i = 0; i < N; ++i) {
+            const size_t value = gi[i];
+            if (value == 0 || value > N || seen[value]) {
+                return false;
+            }
+            seen[value] = true;
+        }
+        if (!Z::kScalarFastPathSupported) {
+            return false;
+        }
+        return true;
+    }
+
     NTT() {
+#ifdef BDF17_VALIDATE_NTT_PARAMS
+        if (!ValidateParams()) {
+            throw "NTT parameter validation failed";
+        }
+#endif
         ComputeOmegaNTable();
         ComputeOmegaOTable();
     }
 
-    uint64_t omega_N_table[N];
-    uint64_t omega_N_inv_table[N];
-    uint64_t omega_N_barrett_table[N];
-    uint64_t omega_N_inv_barrett_table[N];
-
-    uint64_t omega_O_table[N];
-    uint64_t omega_O_inv_table[N];
-    uint64_t omega_O_barrett_table[N];
-    uint64_t omega_O_inv_barrett_table[N];
+    ConstMulTable<N> omega_n_fwd_;
+    ConstMulTable<N> omega_n_inv_;
+    ConstMulTable<N> omega_o_fwd_;
+    ConstMulTable<N> omega_o_inv_;
 };
 
 // wrappers (CircNTT, TensorNTTImpl)
@@ -657,15 +711,24 @@ public:
         ForwardNTTWithBackend<Backend::Auto>(a);
     }
 
+    void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
+        ForwardNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
     template <Backend B = Backend::Auto>
     void ForwardNTTWithBackend(uint64_t a[]) {
+        std::array<uint64_t, PrimitiveNTT::N> scratch{};
+        ForwardNTTWithBackend<B>(a, scratch.data());
+    }
+
+    template <Backend B = Backend::Auto>
+    void ForwardNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         auto t = a[0];
         for (size_t i = 1; i < N; i++) {
             a[0] = Z::Add(a[0], a[i]);
         }
 
-        std::array<uint64_t, PrimitiveNTT::N> scratch{};
-        PrimitiveNTT::GetInstance().template ForwardNTTWithBackend<B>(a + 1, scratch.data());
+        PrimitiveNTT::GetInstance().template ForwardNTTWithBackend<B>(a + 1, scratch);
 
         for (size_t i = 1; i < N; i++) {
             a[i] = Z::Add(a[i], t);
@@ -676,10 +739,19 @@ public:
         InverseNTTWithBackend<Backend::Auto>(a);
     }
 
+    void InverseNTT(uint64_t a[], uint64_t scratch[]) {
+        InverseNTTWithBackend<Backend::Auto>(a, scratch);
+    }
+
     template <Backend B = Backend::Auto>
     void InverseNTTWithBackend(uint64_t a[]) {
         std::array<uint64_t, PrimitiveNTT::N> scratch{};
-        PrimitiveNTT::GetInstance().template InverseNTTWithBackend<B>(a + 1, scratch.data());
+        InverseNTTWithBackend<B>(a, scratch.data());
+    }
+
+    template <Backend B = Backend::Auto>
+    void InverseNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
+        PrimitiveNTT::GetInstance().template InverseNTTWithBackend<B>(a + 1, scratch);
 
         auto t = a[0];
         for (size_t i = 1; i < N; i++) {
@@ -716,22 +788,22 @@ public:
 
     static_assert(NTTp::g == NTTq::g, "g must be the same");
 
-    static void ForwardNTT(uint64_t a[]) {
+    void ForwardNTT(uint64_t a[]) {
         ForwardNTTWithBackend<Backend::Auto>(a);
     }
 
-    static void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
+    void ForwardNTT(uint64_t a[], uint64_t scratch[]) {
         ForwardNTTWithBackend<Backend::Auto>(a, scratch);
     }
 
     template <Backend B = Backend::Auto>
-    static void ForwardNTTWithBackend(uint64_t a[]) {
+    void ForwardNTTWithBackend(uint64_t a[]) {
         auto scratch = std::make_unique<uint64_t[]>(N);
         ForwardNTTWithBackend<B>(a, scratch.get());
     }
 
     template <Backend B = Backend::Auto>
-    static void ForwardNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
+    void ForwardNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t i = 0; i < NTTp::N; i++) {
             auto *b = scratch + NTTq::N * i;
             for (size_t j = 0; j < NTTq::N; j++) {
@@ -756,22 +828,22 @@ public:
         }
     }
 
-    static void InverseNTT(uint64_t a[]) {
+    void InverseNTT(uint64_t a[]) {
         InverseNTTWithBackend<Backend::Auto>(a);
     }
 
-    static void InverseNTT(uint64_t a[], uint64_t scratch[]) {
+    void InverseNTT(uint64_t a[], uint64_t scratch[]) {
         InverseNTTWithBackend<Backend::Auto>(a, scratch);
     }
 
     template <Backend B = Backend::Auto>
-    static void InverseNTTWithBackend(uint64_t a[]) {
+    void InverseNTTWithBackend(uint64_t a[]) {
         auto scratch = std::make_unique<uint64_t[]>(N);
         InverseNTTWithBackend<B>(a, scratch.get());
     }
 
     template <Backend B = Backend::Auto>
-    static void InverseNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
+    void InverseNTTWithBackend(uint64_t a[], uint64_t scratch[]) {
         for (size_t j = 0; j < NTTq::N; j++) {
             auto *b = scratch + NTTp::N * j;
             for (size_t i = 0; i < NTTp::N; i++) {

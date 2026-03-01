@@ -2,6 +2,8 @@
 #define NTT_BACKEND_HPP
 
 enum class Backend {
+    // Auto picks the best backend compiled into this binary (AVX512, then AVX2, then scalar).
+    // It does not perform runtime CPU feature detection.
     Auto,
     Scalar,
     Avx2,

@@ -17,6 +17,7 @@ using CircToyQ = CircNTT<1093ULL, 5ULL, 13, 2>;
 using TensorToy = TensorNTTImpl<CircToyP, CircToyQ>;
 using CurrentCircP = bdf17::DefaultParams::NTTp;
 using CurrentCircQ = bdf17::DefaultParams::NTTq;
+using CurrentPrimitiveP = typename CurrentCircP::PrimitiveNTT;
 using EdgeCircUV10 = CircNTT<72057421557668737ULL, 5ULL, 3, 2>;
 using EdgeCircUV1m = CircNTT<2053ULL, 2ULL, 19, 2>;
 
@@ -171,4 +172,13 @@ TEST(NttPlan, ScalarVsAvxBackendsMatchOnTensorRing) {
 
 TEST(NttPlan, TensorWorkspaceIsReusedAcrossCalls) {
     ExpectWorkspaceReuse<TensorToy>(901);
+}
+
+TEST(NttPlan, OmegaOTableMatchesScalarTrustedBuild) {
+    auto &primitive = CurrentPrimitiveP::GetInstance();
+    const auto scalar_values = primitive.template ComputeOmegaOTableValuesForTesting<Backend::Scalar>();
+    const auto auto_values = primitive.template ComputeOmegaOTableValuesForTesting<Backend::Auto>();
+    const auto &stored_values = primitive.OmegaOForwardTableForTesting().value;
+    EXPECT_EQ(stored_values, scalar_values);
+    EXPECT_EQ(auto_values, scalar_values);
 }
