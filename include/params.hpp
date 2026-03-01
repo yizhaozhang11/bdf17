@@ -20,8 +20,7 @@ struct DefaultParams {
     static constexpr uint64_t kLweKeySwitchBase = kKeySwitchBase;
     static constexpr bool kEnableLweDimReduction = false;
     static constexpr double kLweNoiseVar = 4.0;
-
-    static constexpr size_t kNumTrials = 8;
+    static constexpr double kRlweNoiseVar = 4.0;
     static constexpr double kLweSecretDensity = 0.33;
     static constexpr double kAccumulatorSecretDensity = 0.3;
 

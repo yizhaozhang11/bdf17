@@ -591,9 +591,10 @@ TEST(RLWESampling, EncryptSamplesZeroSumA) {
     SchemeToy::Coeff m_coeff;
     SchemeToy::Plan plan;
     auto m = plan.forward(m_coeff);
+    std::mt19937_64 rng(0xBDF17ULL);
 
     for (size_t iter = 0; iter < 10; ++iter) {
-        auto ct = scheme.RLWEEncrypt(m, scheme.sk, 8);
+        auto ct = scheme.RLWEEncrypt(m, scheme.sk, 8, 4.0, rng);
         auto a_coeff = plan.inverse(ct[0]);
 
         uint64_t sum = 0;

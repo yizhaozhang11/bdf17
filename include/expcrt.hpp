@@ -2,17 +2,17 @@
 #define BDF17_EXPCRT_HPP
 
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <stdexcept>
 #include <vector>
 
+#include "experiment_config.hpp"
 #include "params.hpp"
 #include "typed_poly.hpp"
 
 namespace bdf17 {
 
-enum class ExpCrtVariant {
+enum class ExpCrtVariant : uint8_t {
     TensorTrick,
     Paper,
 };
@@ -110,17 +110,14 @@ struct TensorExpCrtState {
         const std::vector<int64_t> &lwe_secret,
         const std::vector<int64_t> &sk_p,
         const std::vector<int64_t> &sk_q,
-        std::optional<uint64_t> seed = std::nullopt) {
+        RandomContext &rng,
+        double rlwe_noise_variance) {
         SchemePt scheme_pt(sk_p);
         SchemeQt scheme_qt(sk_q);
 
-        if (seed.has_value()) {
-            scheme_pq.engine.seed(*seed);
-        }
-
         auto sk_pq = TensorKey<Params>(scheme_pt.sk, scheme_qt.sk);
         typename SchemePQ::RLWEKey sk_p0{GenKey<typename SchemePt::Transform, typename SchemeQt::Transform>(lwe_secret)};
-        tensor_bk = scheme_pq.KeySwitchGen(sk_pq, sk_p0);
+        tensor_bk = scheme_pq.KeySwitchGen(sk_pq, sk_p0, rlwe_noise_variance, rng.engine);
     }
 };
 

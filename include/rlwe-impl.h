@@ -3,22 +3,22 @@
 
 template <class Transform, uint64_t B, class Plan>
 SchemeImpl<Transform, B, Plan>::SchemeImpl()
-    : sk(), skp(), engine(std::random_device{}()), distribution(0, Q - 1), plan_() {}
+    : sk(), skp(), plan_() {}
 
 template <class Transform, uint64_t B, class Plan>
 SchemeImpl<Transform, B, Plan>::SchemeImpl(std::vector<int64_t> skVec)
-    : sk(1), skp(), engine(std::random_device{}()), distribution(0, Q - 1), plan_() {
+    : sk(1), skp(), plan_() {
     Coeff sk_coeff = Coeff::FromSigned(std::span<const int64_t>(skVec));
     skp = plan_.forward(sk_coeff);
     sk[0] = skp;
 }
 
 template <class Transform, uint64_t B, class Plan>
-void SchemeImpl<Transform, B, Plan>::GaloisKeyGen() {
+void SchemeImpl<Transform, B, Plan>::GaloisKeyGen(std::mt19937_64 &rng, double rlwe_noise_variance) {
     ksk_galois.resize(Eval::O);
     for (size_t a = 2; a < Eval::O; a++) {
         auto sk_a = GaloisConjugate(sk, a);
-        auto ksk = KeySwitchGen(sk_a, sk);
+        auto ksk = KeySwitchGen(sk_a, sk, rlwe_noise_variance, rng);
         ksk_galois[a] = std::move(ksk);
     }
 }
@@ -54,18 +54,21 @@ template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::RLWEEncrypt(
     const Eval &m,
     const RLWEKey &sk,
-    uint64_t q_plain) {
+    uint64_t q_plain,
+    double noise_variance,
+    std::mt19937_64 &rng) {
     const size_t k = sk.size();
     RLWECiphertext ct;
     ct.reserve(k + 1);
 
+    std::uniform_int_distribution<uint64_t> coeff_dist(0, Q - 1);
     Eval result;
     for (size_t i = 0; i < k; i++) {
         // BDF17-style CLWE sampling: choose a in the sum-zero subspace.
         Coeff a_coeff;
         uint64_t sum = 0;
         for (size_t j = 1; j < Eval::N; j++) {
-            a_coeff[j] = distribution(engine);
+            a_coeff[j] = coeff_dist(rng);
             sum = Coeff::Z::Add(sum, a_coeff[j]);
         }
         a_coeff[0] = Coeff::Z::Sub(0, sum);
@@ -75,7 +78,7 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
         ct.push_back(a_eval);
     }
 
-    const auto rand = GaussianSampler<Eval::N>::GetInstance().SampleE(4.0);
+    const auto rand = GaussianSampler<Eval::N>::SampleE(noise_variance, rng);
     Coeff e_coeff = Coeff::FromSigned(std::span<const int64_t>(rand));
     Eval e_eval = plan_.forward(e_coeff);
 
@@ -87,21 +90,29 @@ template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::RLWEGadgetCiphertext SchemeImpl<Transform, B, Plan>::RLWEGadgetEncrypt(
     const Eval &m,
     const RLWEKey &sk,
-    uint64_t q_plain) {
+    uint64_t q_plain,
+    double noise_variance,
+    std::mt19937_64 &rng) {
     RLWEGadgetCiphertext ct(G);
     for (size_t i = 0; i < G; i++) {
-        ct[i] = RLWEEncrypt(m * gadget[i], sk, q_plain);
+        ct[i] = RLWEEncrypt(m * gadget[i], sk, q_plain, noise_variance, rng);
     }
     return ct;
 }
 
 template <class Transform, uint64_t B, class Plan>
-typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext SchemeImpl<Transform, B, Plan>::RGSWEncrypt(const Eval &m, const RLWEKey &sk) {
+typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext SchemeImpl<Transform, B, Plan>::RGSWEncrypt(
+    const Eval &m,
+    const RLWEKey &sk,
+    double noise_variance,
+    std::mt19937_64 &rng) {
     if (sk.size() != 1) {
         throw std::runtime_error("RGSW encryption requires a secret key of size 1");
     }
     const Eval s = sk[0];
-    return std::make_pair(RLWEGadgetEncrypt(m * s, sk, Q), RLWEGadgetEncrypt(m, sk, Q));
+    return std::make_pair(
+        RLWEGadgetEncrypt(m * s, sk, Q, noise_variance, rng),
+        RLWEGadgetEncrypt(m, sk, Q, noise_variance, rng));
 }
 
 template <class Transform, uint64_t B, class Plan>
@@ -185,11 +196,15 @@ SchemeImpl<Transform, B, Plan>::BaseDecomposeToEval(const Eval &a, const Plan &p
 }
 
 template <class Transform, uint64_t B, class Plan>
-typename SchemeImpl<Transform, B, Plan>::RLWESwitchingKey SchemeImpl<Transform, B, Plan>::KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN) {
+typename SchemeImpl<Transform, B, Plan>::RLWESwitchingKey SchemeImpl<Transform, B, Plan>::KeySwitchGen(
+    const RLWEKey &sk,
+    const RLWEKey &skN,
+    double noise_variance,
+    std::mt19937_64 &rng) {
     RLWESwitchingKey result;
     result.reserve(sk.size());
     for (size_t i = 0; i < sk.size(); i++) {
-        result.push_back(RLWEGadgetEncrypt(sk[i], skN, Q));
+        result.push_back(RLWEGadgetEncrypt(sk[i], skN, Q, noise_variance, rng));
     }
     return result;
 }
@@ -265,7 +280,10 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
 }
 
 template <class Transform, uint64_t B, class Plan>
-std::vector<typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext> SchemeImpl<Transform, B, Plan>::BootstrappingKeyGen(std::vector<int64_t> z) {
+std::vector<typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext> SchemeImpl<Transform, B, Plan>::BootstrappingKeyGen(
+    std::vector<int64_t> z,
+    double noise_variance,
+    std::mt19937_64 &rng) {
     std::vector<RGSWCiphertext> result;
     result.reserve(z.size());
     for (size_t i = 0; i < z.size(); i++) {
@@ -275,7 +293,7 @@ std::vector<typename SchemeImpl<Transform, B, Plan>::RGSWCiphertext> SchemeImpl<
         }
         Coeff m_coeff = Coeff::Monomial(static_cast<size_t>(idx), 1);
         Eval m_eval = plan_.forward(m_coeff);
-        result.push_back(RGSWEncrypt(m_eval, sk));
+        result.push_back(RGSWEncrypt(m_eval, sk, noise_variance, rng));
     }
     return result;
 }

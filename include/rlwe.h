@@ -16,13 +16,12 @@
 template <size_t l>
 class GaussianSampler {
 public:
-    static GaussianSampler &GetInstance() {
-        static GaussianSampler instance;
-        return instance;
-    }
-
-    std::vector<int64_t> SampleE(double var) {
+    static std::vector<int64_t> SampleE(double var, std::mt19937_64 &engine) {
         std::vector<int64_t> a(l, 0);
+        if (l == 0) {
+            return a;
+        }
+        std::uniform_int_distribution<size_t> distribution(0, l - 1);
         for (size_t i = 0; i < var * l / 2; i++) {
             a[distribution(engine)]++;
             a[distribution(engine)]--;
@@ -30,8 +29,12 @@ public:
         return a;
     }
 
-    std::vector<int64_t> SampleSk(double density) {
+    static std::vector<int64_t> SampleSk(double density, std::mt19937_64 &engine) {
         std::vector<int64_t> a(l, 0);
+        if (l == 0) {
+            return a;
+        }
+        std::uniform_int_distribution<size_t> distribution(0, l - 1);
         size_t count1 = density * l;
         while (count1 > 0) {
             size_t i = distribution(engine);
@@ -50,21 +53,6 @@ public:
         }
         return a;
     }
-
-    void Seed(uint64_t seed) {
-        std::seed_seq seq{
-            static_cast<uint32_t>(seed),
-            static_cast<uint32_t>(seed >> 32),
-            static_cast<uint32_t>(l),
-            static_cast<uint32_t>(l >> 32)};
-        engine.seed(seq);
-    }
-
-private:
-    std::mt19937 engine;
-    std::uniform_int_distribution<int64_t> distribution;
-
-    GaussianSampler() : engine(std::random_device{}()), distribution(0, l - 1) {}
 };
 
 template <class Transform_, uint64_t B, class Plan_ = CanonicalNttPlan<Transform_>>
@@ -111,13 +99,10 @@ public:
 
     std::vector<RLWESwitchingKey> ksk_galois;
 
-    std::mt19937_64 engine;
-    std::uniform_int_distribution<uint64_t> distribution;
-
     SchemeImpl();
     explicit SchemeImpl(std::vector<int64_t> skVec);
 
-    void GaloisKeyGen();
+    void GaloisKeyGen(std::mt19937_64 &rng, double rlwe_noise_variance);
 
     template <typename T>
     static std::vector<T> GaloisConjugate(const std::vector<T> &x, const size_t &a);
@@ -133,18 +118,18 @@ public:
     template <typename S>
     static typename S::RLWECiphertext ModSwitch(const RLWECiphertext &ct);
 
-    RLWECiphertext RLWEEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain);
-    RLWEGadgetCiphertext RLWEGadgetEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain);
-    RGSWCiphertext RGSWEncrypt(const Eval &m, const RLWEKey &sk);
+    RLWECiphertext RLWEEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain, double noise_variance, std::mt19937_64 &rng);
+    RLWEGadgetCiphertext RLWEGadgetEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain, double noise_variance, std::mt19937_64 &rng);
+    RGSWCiphertext RGSWEncrypt(const Eval &m, const RLWEKey &sk, double noise_variance, std::mt19937_64 &rng);
     Coeff RLWEDecrypt(const RLWECiphertext &ct, const RLWEKey &sk, uint64_t q_plain) const;
 
     static RLWECiphertext Mult(Eval a, const RLWEGadgetCiphertext &ct);
     static RLWECiphertext ExtMult(const RLWECiphertext &ct, const RGSWCiphertext &ctGSW);
 
-    RLWESwitchingKey KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN);
+    RLWESwitchingKey KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN, double noise_variance, std::mt19937_64 &rng);
     static RLWECiphertext KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &k);
 
-    std::vector<RGSWCiphertext> BootstrappingKeyGen(std::vector<int64_t> z);
+    std::vector<RGSWCiphertext> BootstrappingKeyGen(std::vector<int64_t> z, double noise_variance, std::mt19937_64 &rng);
     RLWECiphertext Process(const std::vector<RGSWCiphertext> &bk, std::vector<int64_t> a, int64_t b, uint64_t q_plain);
 
 private:

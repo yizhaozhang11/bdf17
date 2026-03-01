@@ -2,11 +2,11 @@
 #define BDF17_ACCUMULATOR_HPP
 
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
+#include "experiment_config.hpp"
 #include "params.hpp"
 
 namespace bdf17 {
@@ -28,22 +28,18 @@ struct AccumulatorState {
     BootstrappingKeyP bk_p;
     BootstrappingKeyQ bk_q;
 
-    explicit AccumulatorState(const std::vector<int64_t> &lwe_secret, std::optional<uint64_t> seed = std::nullopt)
-        : sk_p(GaussianSampler<EvalP::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
-          sk_q(GaussianSampler<EvalQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
+    explicit AccumulatorState(const std::vector<int64_t> &lwe_secret, RandomContext &rng, double rlwe_noise_variance)
+        : sk_p(GaussianSampler<EvalP::N>::SampleSk(Params::kAccumulatorSecretDensity, rng.engine)),
+          sk_q(GaussianSampler<EvalQ::N>::SampleSk(Params::kAccumulatorSecretDensity, rng.engine)),
           scheme_p(sk_p),
           scheme_q(sk_q) {
         if (lwe_secret.size() != Params::kLweAccumulatorDimension) {
             throw std::runtime_error("lwe_secret size mismatch");
         }
-        if (seed.has_value()) {
-            scheme_p.engine.seed(*seed);
-            scheme_q.engine.seed(*seed + 1);
-        }
-        scheme_p.GaloisKeyGen();
-        scheme_q.GaloisKeyGen();
-        bk_p = scheme_p.BootstrappingKeyGen(lwe_secret);
-        bk_q = scheme_q.BootstrappingKeyGen(lwe_secret);
+        scheme_p.GaloisKeyGen(rng.engine, rlwe_noise_variance);
+        scheme_q.GaloisKeyGen(rng.engine, rlwe_noise_variance);
+        bk_p = scheme_p.BootstrappingKeyGen(lwe_secret, rlwe_noise_variance, rng.engine);
+        bk_q = scheme_q.BootstrappingKeyGen(lwe_secret, rlwe_noise_variance, rng.engine);
     }
 };
 
