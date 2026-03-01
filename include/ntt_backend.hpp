@@ -3,7 +3,8 @@
 
 enum class Backend {
     // Auto picks the best backend compiled into this binary (AVX512, then AVX2, then scalar).
-    // It does not perform runtime CPU feature detection.
+    // If BDF17_ENABLE_RUNTIME_BACKEND_DISPATCH is defined, Auto resolves at runtime to the
+    // best compiled backend supported by the current CPU.
     Auto,
     Scalar,
     Avx2,
@@ -21,6 +22,54 @@ constexpr bool kAvx512BackendCompiled = true;
 #else
 constexpr bool kAvx512BackendCompiled = false;
 #endif
+
+constexpr Backend BestCompiledBackend() noexcept {
+    if constexpr (kAvx512BackendCompiled) {
+        return Backend::Avx512;
+    }
+    if constexpr (kAvx2BackendCompiled) {
+        return Backend::Avx2;
+    }
+    return Backend::Scalar;
+}
+
+inline bool RuntimeSupportsAvx2() noexcept {
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+    return __builtin_cpu_supports("avx2");
+#else
+    return false;
+#endif
+}
+
+inline bool RuntimeSupportsAvx512() noexcept {
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+    return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq");
+#else
+    return false;
+#endif
+}
+
+inline Backend BestRuntimeBackend() noexcept {
+    if constexpr (kAvx512BackendCompiled) {
+        if (RuntimeSupportsAvx512()) {
+            return Backend::Avx512;
+        }
+    }
+    if constexpr (kAvx2BackendCompiled) {
+        if (RuntimeSupportsAvx2()) {
+            return Backend::Avx2;
+        }
+    }
+    return Backend::Scalar;
+}
+
+inline Backend ResolveAutoBackend() noexcept {
+#if defined(BDF17_ENABLE_RUNTIME_BACKEND_DISPATCH)
+    return BestRuntimeBackend();
+#else
+    return BestCompiledBackend();
+#endif
+}
 
 template <Backend B>
 constexpr bool BackendCompiled() {

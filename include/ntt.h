@@ -581,12 +581,33 @@ private:
             MixedRadix23NTTScalar(a, b, omega_table);
 #endif
         } else {
+#if defined(BDF17_ENABLE_RUNTIME_BACKEND_DISPATCH)
+            switch (ResolveAutoBackend()) {
+                case Backend::Avx512:
+#if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
+                    MixedRadix23NTTAVX512(a, b, omega_table);
+                    return;
+#endif
+                    break;
+                case Backend::Avx2:
+#if defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
+                    MixedRadix23NTTAVX2(a, b, omega_table);
+                    return;
+#endif
+                    break;
+                case Backend::Scalar:
+                case Backend::Auto:
+                    break;
+            }
+            MixedRadix23NTTScalar(a, b, omega_table);
+#else
 #if defined(BDF17_ENABLE_AVX512) && defined(__AVX512F__) && defined(__AVX512DQ__)
             MixedRadix23NTTAVX512(a, b, omega_table);
 #elif defined(BDF17_ENABLE_AVX2) && defined(__AVX2__)
             MixedRadix23NTTAVX2(a, b, omega_table);
 #else
             MixedRadix23NTTScalar(a, b, omega_table);
+#endif
 #endif
         }
     }

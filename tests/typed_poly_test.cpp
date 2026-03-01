@@ -15,6 +15,9 @@ namespace {
 using CircToy = CircNTT<1093ULL, 5ULL, 13, 2>;
 using CoeffToy = CoeffPoly<CircToy>;
 using EvalToy = EvalPoly<CircToy>;
+using CoeffToyView = CoeffPolyView<CircToy>;
+using ConstCoeffToyView = ConstCoeffPolyView<CircToy>;
+using CoeffToyBuffer = CoeffPolyBuffer<CircToy>;
 
 static_assert(requires(const CoeffToy &a, const CoeffToy &b) { a + b; });
 static_assert(requires(const CoeffToy &a, const CoeffToy &b) { a - b; });
@@ -27,6 +30,11 @@ static_assert(requires(const CoeffToy &a) { a * 7ULL; });
 static_assert(requires(const EvalToy &a) { 7ULL * a; });
 static_assert(requires { CoeffToy::FromUnsigned(std::span<const uint64_t>{}); });
 static_assert(requires { CoeffToy::FromSigned(std::span<const int64_t>{}); });
+static_assert(requires(CoeffToy &a) { a.view(); });
+static_assert(requires(const CoeffToy &a) { a.view(); });
+static_assert(requires(CoeffToyView v) { v.span(); v.data(); });
+static_assert(requires(ConstCoeffToyView v) { v.span(); v.data(); });
+static_assert(requires(CoeffToyBuffer b) { b.raw_span(); b.poly_count(); b[0]; });
 
 uint64_t SignedMod(int64_t value, uint64_t mod) {
     const int64_t mod_i64 = static_cast<int64_t>(mod);
@@ -149,6 +157,42 @@ TEST(TypedPoly, InPlaceOpsAndZeroHelpers) {
 
     lhs_eval *= rhs_eval;
     EXPECT_EQ(lhs_eval, expected_eval);
+}
+
+TEST(TypedPoly, PolyViewSharesUnderlyingStorage) {
+    const std::array<uint64_t, 6> coeff_input{1, 2, 3, 4, 5, 6};
+    auto coeff = CoeffToy::FromUnsigned(std::span<const uint64_t>(coeff_input));
+    CoeffToyView coeff_view = coeff.view();
+    coeff_view[3] = 777;
+    EXPECT_EQ(coeff[3], 777ULL);
+
+    const CoeffToy &const_coeff = coeff;
+    ConstCoeffToyView const_view = const_coeff.view();
+    EXPECT_EQ(const_view[3], coeff[3]);
+
+    CoeffToy copied_from_view(const_view);
+    EXPECT_EQ(copied_from_view, coeff);
+}
+
+TEST(TypedPoly, PolyBufferProvidesContiguousViews) {
+    CoeffToyBuffer buffer(3);
+    EXPECT_EQ(buffer.poly_count(), 3U);
+    ASSERT_EQ(buffer.raw_span().size(), 3 * CircToy::N);
+
+    for (size_t poly_idx = 0; poly_idx < buffer.poly_count(); ++poly_idx) {
+        auto view = buffer[poly_idx];
+        for (size_t i = 0; i < CircToy::N; ++i) {
+            view[i] = static_cast<uint64_t>(100 * poly_idx + i);
+        }
+    }
+
+    const auto raw = buffer.raw_span();
+    for (size_t poly_idx = 0; poly_idx < buffer.poly_count(); ++poly_idx) {
+        for (size_t i = 0; i < CircToy::N; ++i) {
+            const size_t flat_idx = poly_idx * CircToy::N + i;
+            EXPECT_EQ(raw[flat_idx], static_cast<uint64_t>(100 * poly_idx + i));
+        }
+    }
 }
 
 TEST(TypedPoly, EvalPointwiseMultiplyMatchesCircularConvolution) {

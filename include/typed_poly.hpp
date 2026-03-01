@@ -2,6 +2,7 @@
 #define TYPED_POLY_HPP
 
 #include <algorithm>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -18,11 +19,159 @@ struct CanonicalEvalTag {};
 template <class Transform, class DomainTag>
 class PolyRep;
 
+template <class Transform, class DomainTag>
+class ConstPolyView;
+
+template <class Transform, class DomainTag>
+class PolyView {
+public:
+    static constexpr uint64_t p = Transform::p;
+    static constexpr size_t O = Transform::O;
+    static constexpr size_t N = Transform::N;
+
+    using TransformType = Transform;
+    using Domain = DomainTag;
+
+    explicit PolyView(uint64_t *data) noexcept : data_(data) {
+        assert(data_ != nullptr);
+    }
+
+    explicit PolyView(std::span<uint64_t> data) noexcept : data_(data.data()) {
+        assert(data.size() >= N);
+        assert(data_ != nullptr);
+    }
+
+    size_t size() const noexcept {
+        return N;
+    }
+
+    uint64_t *data() noexcept {
+        return data_;
+    }
+
+    const uint64_t *data() const noexcept {
+        return data_;
+    }
+
+    std::span<uint64_t, N> span() const noexcept {
+        return std::span<uint64_t, N>(data_, N);
+    }
+
+    uint64_t &operator[](size_t idx) noexcept {
+        return data_[idx];
+    }
+
+    const uint64_t &operator[](size_t idx) const noexcept {
+        return data_[idx];
+    }
+
+    operator ConstPolyView<Transform, DomainTag>() const noexcept {
+        return ConstPolyView<Transform, DomainTag>(data_);
+    }
+
+private:
+    uint64_t *data_;
+};
+
+template <class Transform, class DomainTag>
+class ConstPolyView {
+public:
+    static constexpr uint64_t p = Transform::p;
+    static constexpr size_t O = Transform::O;
+    static constexpr size_t N = Transform::N;
+
+    using TransformType = Transform;
+    using Domain = DomainTag;
+
+    explicit ConstPolyView(const uint64_t *data) noexcept : data_(data) {
+        assert(data_ != nullptr);
+    }
+
+    explicit ConstPolyView(std::span<const uint64_t> data) noexcept : data_(data.data()) {
+        assert(data.size() >= N);
+        assert(data_ != nullptr);
+    }
+
+    size_t size() const noexcept {
+        return N;
+    }
+
+    const uint64_t *data() const noexcept {
+        return data_;
+    }
+
+    std::span<const uint64_t, N> span() const noexcept {
+        return std::span<const uint64_t, N>(data_, N);
+    }
+
+    const uint64_t &operator[](size_t idx) const noexcept {
+        return data_[idx];
+    }
+
+private:
+    const uint64_t *data_;
+};
+
+template <class Transform, class DomainTag>
+class PolyBuffer {
+public:
+    static constexpr size_t N = Transform::N;
+
+    explicit PolyBuffer(size_t poly_count) : storage_(poly_count * N, 0) {}
+
+    size_t poly_count() const noexcept {
+        return storage_.size() / N;
+    }
+
+    size_t size() const noexcept {
+        return storage_.size();
+    }
+
+    std::span<uint64_t> raw_span() noexcept {
+        return std::span<uint64_t>(storage_.data(), storage_.size());
+    }
+
+    std::span<const uint64_t> raw_span() const noexcept {
+        return std::span<const uint64_t>(storage_.data(), storage_.size());
+    }
+
+    PolyView<Transform, DomainTag> operator[](size_t idx) noexcept {
+        assert(idx < poly_count());
+        return PolyView<Transform, DomainTag>(storage_.data() + idx * N);
+    }
+
+    ConstPolyView<Transform, DomainTag> operator[](size_t idx) const noexcept {
+        assert(idx < poly_count());
+        return ConstPolyView<Transform, DomainTag>(storage_.data() + idx * N);
+    }
+
+private:
+    std::vector<uint64_t> storage_;
+};
+
 template <class Transform>
 using CoeffPoly = PolyRep<Transform, CoeffTag>;
 
 template <class Transform>
 using EvalPoly = PolyRep<Transform, CanonicalEvalTag>;
+
+template <class Transform>
+using CoeffPolyView = PolyView<Transform, CoeffTag>;
+
+template <class Transform>
+using EvalPolyView = PolyView<Transform, CanonicalEvalTag>;
+
+template <class Transform>
+using ConstCoeffPolyView = ConstPolyView<Transform, CoeffTag>;
+
+template <class Transform>
+using ConstEvalPolyView = ConstPolyView<Transform, CanonicalEvalTag>;
+
+template <class Transform>
+using CoeffPolyBuffer = PolyBuffer<Transform, CoeffTag>;
+
+template <class Transform>
+using EvalPolyBuffer = PolyBuffer<Transform, CanonicalEvalTag>;
 
 template <class Transform, class DomainTag>
 class PolyRep {
@@ -41,6 +190,10 @@ public:
 
     PolyRep(const PolyRep &rhs) : a_(std::make_unique<uint64_t[]>(N)) {
         std::copy_n(rhs.a_.get(), N, a_.get());
+    }
+
+    explicit PolyRep(ConstPolyView<Transform, DomainTag> rhs_view) : a_(std::make_unique<uint64_t[]>(N)) {
+        std::copy_n(rhs_view.data(), N, a_.get());
     }
 
     PolyRep &operator=(const PolyRep &rhs) {
@@ -83,6 +236,14 @@ public:
 
     const uint64_t &operator[](size_t idx) const {
         return a_[idx];
+    }
+
+    PolyView<Transform, DomainTag> view() noexcept {
+        return PolyView<Transform, DomainTag>(a_.get());
+    }
+
+    ConstPolyView<Transform, DomainTag> view() const noexcept {
+        return ConstPolyView<Transform, DomainTag>(a_.get());
     }
 
     void Fill(uint64_t x) noexcept {

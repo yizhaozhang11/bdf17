@@ -14,10 +14,13 @@ endif()
 option(ENABLE_BENCHMARKS "Enable benchmarking with Google Benchmark" ON)
 option(ENABLE_AVX2 "Enable AVX2 NTT kernels (requires AVX2-capable toolchain/CPU)" ON)
 option(ENABLE_AVX512 "Enable AVX-512 NTT kernels (requires AVX-512 capable toolchain/CPU)" OFF)
+option(BDF17_NATIVE_ARCH "Enable -march=native for local performance builds" ON)
+option(BDF17_RUNTIME_BACKEND_DISPATCH "Enable runtime backend dispatch for Backend::Auto (groundwork)" OFF)
 
-set(BDF17_ARCH_FLAGS
-    -march=native
-)
+set(BDF17_ARCH_FLAGS)
+if(BDF17_NATIVE_ARCH)
+    list(APPEND BDF17_ARCH_FLAGS -march=native)
+endif()
 if(ENABLE_AVX2)
     list(APPEND BDF17_ARCH_FLAGS -mavx2)
 endif()
@@ -34,6 +37,9 @@ if(ENABLE_AVX2)
 endif()
 if(ENABLE_AVX512)
     list(APPEND BDF17_COMPILE_DEFS BDF17_ENABLE_AVX512=1)
+endif()
+if(BDF17_RUNTIME_BACKEND_DISPATCH)
+    list(APPEND BDF17_COMPILE_DEFS BDF17_ENABLE_RUNTIME_BACKEND_DISPATCH=1)
 endif()
 
 # Add source files

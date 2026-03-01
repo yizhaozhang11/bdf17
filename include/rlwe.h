@@ -76,9 +76,13 @@ public:
     using Coeff = CoeffPoly<Transform>;
     using Eval = EvalPoly<Transform>;
     using Poly = Eval; // Compatibility-only alias; prefer Coeff/Eval in new code.
+    using CoeffBuffer = CoeffPolyBuffer<Transform>;
+    using EvalBuffer = EvalPolyBuffer<Transform>;
 
     using RLWEKey = std::vector<Eval>;
     using RLWECiphertext = std::vector<Eval>;
+    // Optional contiguous buffer groundwork for future ciphertext layout refactors.
+    using RLWECiphertextBuffer = EvalBuffer;
     using RLWEGadgetCiphertext = std::vector<RLWECiphertext>;
     using RLWESwitchingKey = std::vector<RLWEGadgetCiphertext>;
     using RGSWCiphertext = std::pair<RLWEGadgetCiphertext, RLWEGadgetCiphertext>;
