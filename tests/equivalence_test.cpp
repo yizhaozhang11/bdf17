@@ -381,7 +381,7 @@ TEST(Equivalence, FoldCrtEqualsFoldPaperAfterTwistsRandom) {
     }
 }
 
-TEST(Equivalence, ExpCrtCiphertextPhaseMatchesPaperReferenceNoiseless) {
+TEST(Equivalence, TensorTrickCombinePhaseMatchesPaperReferenceNoiseless) {
     const uint64_t expcrt_scale = (ToyEqParams::SchemePQ::Q - ToyEqParams::kPlainModulus) % kMod;
     const uint64_t delta = 1;
     const uint64_t expected_phase_unit = MulMod(expcrt_scale, MulMod(delta, delta, kMod), kMod);
@@ -435,7 +435,7 @@ TEST(Equivalence, ExpCrtCiphertextPhaseMatchesPaperReferenceNoiseless) {
     }
 }
 
-TEST(Equivalence, ExpCrtPlusF0ExtractionMatchesPaperReferenceNoiseless) {
+TEST(Equivalence, TensorTrickCombinePlusF0ExtractionMatchesPaperReferenceNoiseless) {
     const uint64_t expcrt_scale = (ToyEqParams::SchemePQ::Q - ToyEqParams::kPlainModulus) % kMod;
     const uint64_t delta = 1;
     const uint64_t expected_phase_unit = MulMod(expcrt_scale, MulMod(delta, delta, kMod), kMod);
@@ -485,6 +485,27 @@ TEST(Equivalence, ExpCrtPlusF0ExtractionMatchesPaperReferenceNoiseless) {
                 << "(m_p,m_q)=(" << m_p << "," << m_q << ") expected=" << expected << " got_paper=" << paper_scalar;
         }
     }
+}
+
+TEST(Equivalence, FuturePaperCombinePathHasReferenceCoverage) {
+    const uint64_t expcrt_scale = (ToyEqParams::SchemePQ::Q - ToyEqParams::kPlainModulus) % kMod;
+    const auto sp = BuildDeterministicSecret(kP, 0x9A);
+    const auto sq = BuildDeterministicSecret(kQ, 0xBC);
+
+    const auto cp = MakeNoiselessRlweCtRef(sp, MakeMonomialP(2), 1, 0x5511ULL);
+    const auto cq = MakeNoiselessRlweCtRef(sq, MakeMonomialQ(4), 1, 0x6622ULL);
+
+    const auto paper_ref = PaperExpCrtRef(cp, cq, sp, sq, expcrt_scale);
+    const auto paper_phase = PhaseRef(paper_ref.ct, paper_ref.secret);
+
+    EXPECT_EQ(paper_ref.ct.a0.size(), kPQ);
+    EXPECT_EQ(paper_ref.ct.a1.size(), kPQ);
+    EXPECT_EQ(paper_ref.ct.a2.size(), kPQ);
+    EXPECT_EQ(paper_ref.ct.b.size(), kPQ);
+    EXPECT_EQ(paper_ref.secret.s0.size(), kPQ);
+    EXPECT_EQ(paper_ref.secret.s1.size(), kPQ);
+    EXPECT_EQ(paper_ref.secret.s2.size(), kPQ);
+    EXPECT_EQ(paper_phase.size(), kPQ);
 }
 
 TEST(Equivalence, TraceCoeffMatchesTransportedPaperTraceExhaustive) {

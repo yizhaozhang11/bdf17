@@ -26,3 +26,17 @@ TEST(BootstrapRunner, SingleTrialProducesResultAndMetrics) {
     EXPECT_GE(metrics.fun_extract.trace_calls, 1u);
     EXPECT_GE(metrics.total.keyswitch, metrics.lwe_keyswitch.keyswitch);
 }
+
+TEST(BootstrapRunner, RejectsUnsupportedPaperVariantBeforeTrial) {
+    bdf17::ExperimentConfig config{};
+    config.seed = 0xC0FFEEULL;
+    config.num_trials = 1;
+    config.expcrt_variant = bdf17::ExpCrtVariant::Paper;
+    config.profile_name = "toy-equivalence";
+    config.lut_name = "lowbit";
+    config.enable_lwe_dim_reduction_override = false;
+    config.has_enable_lwe_dim_reduction_override = false;
+    config.emit_json = false;
+
+    EXPECT_THROW((void)bdf17::BootstrapRunner<bdf17::ToyEquivalenceProfile>(config), std::runtime_error);
+}
