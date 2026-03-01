@@ -2,6 +2,7 @@
 #define BDF17_ACCUMULATOR_HPP
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -27,13 +28,17 @@ struct AccumulatorState {
     BootstrappingKeyP bk_p;
     BootstrappingKeyQ bk_q;
 
-    explicit AccumulatorState(const std::vector<int64_t> &lwe_secret)
+    explicit AccumulatorState(const std::vector<int64_t> &lwe_secret, std::optional<uint64_t> seed = std::nullopt)
         : sk_p(GaussianSampler<EvalP::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
           sk_q(GaussianSampler<EvalQ::N>::GetInstance().SampleSk(Params::kAccumulatorSecretDensity)),
           scheme_p(sk_p),
           scheme_q(sk_q) {
         if (lwe_secret.size() != Params::kLweAccumulatorDimension) {
             throw std::runtime_error("lwe_secret size mismatch");
+        }
+        if (seed.has_value()) {
+            scheme_p.engine.seed(*seed);
+            scheme_q.engine.seed(*seed + 1);
         }
         scheme_p.GaloisKeyGen();
         scheme_q.GaloisKeyGen();

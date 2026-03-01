@@ -2,6 +2,7 @@
 #define BDF17_EXPCRT_HPP
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -104,9 +105,17 @@ struct TensorExpCrtState {
     SchemePQ scheme_pq;
     typename SchemePQ::RLWESwitchingKey tensor_bk;
 
-    TensorExpCrtState(const std::vector<int64_t> &lwe_secret, const std::vector<int64_t> &sk_p, const std::vector<int64_t> &sk_q) {
+    TensorExpCrtState(
+        const std::vector<int64_t> &lwe_secret,
+        const std::vector<int64_t> &sk_p,
+        const std::vector<int64_t> &sk_q,
+        std::optional<uint64_t> seed = std::nullopt) {
         SchemePt scheme_pt(sk_p);
         SchemeQt scheme_qt(sk_q);
+
+        if (seed.has_value()) {
+            scheme_pq.engine.seed(*seed);
+        }
 
         auto sk_pq = TensorKey<Params>(scheme_pt.sk, scheme_qt.sk);
         typename SchemePQ::RLWEKey sk_p0{GenKey<typename SchemePt::Transform, typename SchemeQt::Transform>(lwe_secret)};

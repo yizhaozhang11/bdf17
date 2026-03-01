@@ -50,6 +50,15 @@ public:
         return a;
     }
 
+    void Seed(uint64_t seed) {
+        std::seed_seq seq{
+            static_cast<uint32_t>(seed),
+            static_cast<uint32_t>(seed >> 32),
+            static_cast<uint32_t>(l),
+            static_cast<uint32_t>(l >> 32)};
+        engine.seed(seq);
+    }
+
 private:
     std::mt19937 engine;
     std::uniform_int_distribution<int64_t> distribution;
