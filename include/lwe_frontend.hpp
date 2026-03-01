@@ -168,7 +168,7 @@ inline uint64_t DecryptLwe(const LweCiphertext &ct, const std::vector<int64_t> &
     return DecodeMessage(DecryptPhase(ct, sk, mod), plain_modulus, mod);
 }
 
-inline uint64_t ModSwitchScalar(uint64_t value, uint64_t q_from, uint64_t q_to) {
+[[nodiscard]] inline uint64_t ModSwitchScalar(uint64_t value, uint64_t q_from, uint64_t q_to) {
     if (q_from == 0 || q_to == 0) {
         throw std::runtime_error("modulus must be non-zero");
     }
@@ -181,7 +181,7 @@ inline uint64_t ModSwitchScalar(uint64_t value, uint64_t q_from, uint64_t q_to) 
     return out;
 }
 
-inline LweCiphertext ModSwitchLwe(const LweCiphertext &ct, uint64_t q_from, uint64_t q_to, uint64_t plain_modulus) {
+[[nodiscard]] inline LweCiphertext ModSwitchLwe(const LweCiphertext &ct, uint64_t q_from, uint64_t q_to, uint64_t plain_modulus) {
     if (plain_modulus == 0) {
         throw std::runtime_error("plain modulus must be non-zero");
     }
@@ -283,7 +283,7 @@ inline LweKeySwitchKey GenerateLweKeySwitchKey(
     return ksk;
 }
 
-inline LweCiphertext ApplyLweKeySwitch(const LweCiphertext &ct_in, const LweKeySwitchKey &ksk) {
+[[nodiscard]] inline LweCiphertext ApplyLweKeySwitch(const LweCiphertext &ct_in, const LweKeySwitchKey &ksk) {
     if (ct_in.a.size() != ksk.n_in) {
         throw std::runtime_error("ciphertext/key-switch input dimension mismatch");
     }

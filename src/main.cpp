@@ -42,7 +42,7 @@ const char *VariantName(const bdf17::ExpCrtVariant variant) {
 void PrintUsage(const char *argv0) {
     std::cout << "Usage: " << argv0
               << " [--seed <uint64>] [--trials <size_t>] [--profile <name>] [--expcrt-variant <tensortrick|paper>]"
-              << " [--lut <lowbit|parity>] [--json] [--enable-lwe-dim-reduction <0|1>]" << std::endl;
+              << " [--lut <lowbit|hamming-parity|parity>] [--json] [--enable-lwe-dim-reduction <0|1>]" << std::endl;
 }
 
 uint64_t ParseUint64(const std::string &text, const std::string &flag) {
@@ -181,9 +181,17 @@ void ValidateExperimentConfig(const ExperimentConfig &config) {
     if (config.num_trials == 0) {
         throw std::runtime_error("--trials must be greater than zero");
     }
-    if (config.lut_name != "lowbit" && config.lut_name != "parity") {
-        throw std::runtime_error("unsupported --lut value: " + config.lut_name);
-    }
+    (void)bdf17::ParseLutKindOrThrow(config.lut_name);
+}
+
+template <typename Params>
+void ValidateRunConfigOrThrow(const ExperimentConfig &config) {
+    const bool dim_reduction_enabled =
+        config.has_enable_lwe_dim_reduction_override
+            ? config.enable_lwe_dim_reduction_override
+            : Params::kEnableLweDimReduction;
+    bdf17::ValidateProfileOrThrow<Params>(dim_reduction_enabled, config.expcrt_variant);
+    (void)bdf17::ParseLutKindOrThrow(config.lut_name);
 }
 
 void PrintStageText(const char *name, const StageStats &stats, size_t num_trials) {
@@ -337,6 +345,7 @@ void PrintJson(
 
 template <typename Params>
 int RunExperiment(const ExperimentConfig &config) {
+    ValidateRunConfigOrThrow<Params>(config);
     bdf17::BootstrapRunner<Params> runner(config);
     const ExperimentConfig &resolved_config = runner.config();
 

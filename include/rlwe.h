@@ -116,7 +116,7 @@ public:
     static void ModSwitch(Coeff &x, uint64_t q);
 
     template <typename S>
-    static typename S::RLWECiphertext ModSwitch(const RLWECiphertext &ct);
+    [[nodiscard]] static typename S::RLWECiphertext ModSwitch(const RLWECiphertext &ct);
 
     RLWECiphertext RLWEEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain, double noise_variance, std::mt19937_64 &rng);
     RLWEGadgetCiphertext RLWEGadgetEncrypt(const Eval &m, const RLWEKey &sk, uint64_t q_plain, double noise_variance, std::mt19937_64 &rng);
@@ -127,7 +127,7 @@ public:
     static RLWECiphertext ExtMult(const RLWECiphertext &ct, const RGSWCiphertext &ctGSW);
 
     RLWESwitchingKey KeySwitchGen(const RLWEKey &sk, const RLWEKey &skN, double noise_variance, std::mt19937_64 &rng);
-    static RLWECiphertext KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &k);
+    [[nodiscard]] static RLWECiphertext KeySwitch(const RLWECiphertext &ct, const RLWESwitchingKey &k);
 
     std::vector<RGSWCiphertext> BootstrappingKeyGen(std::vector<int64_t> z, double noise_variance, std::mt19937_64 &rng);
     RLWECiphertext Process(const std::vector<RGSWCiphertext> &bk, std::vector<int64_t> a, int64_t b, uint64_t q_plain);

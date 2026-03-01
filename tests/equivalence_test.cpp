@@ -201,16 +201,16 @@ CurrentExpCrtPhaseResult CurrentExpCrtPhaseNoiselessRef(
 }
 
 std::string LutName(size_t lut_id) {
-    return lut_id == 0 ? "parity" : "custom";
+    return lut_id == 0 ? "lowbit" : "custom";
 }
 
 } // namespace
 
 TEST(Equivalence, PaperBootstrapFunctionRefBasicSanity) {
-    const std::vector<size_t> parity = bdf17::BuildParityLut<ToyEqParams>();
+    const std::vector<size_t> lowbit = bdf17::BuildLowBitLut<ToyEqParams>();
     const std::vector<size_t> custom{0, 1, 1, 0, 1, 0, 0, 1};
 
-    const auto parity_f = BuildPaperBootstrapFunctionRef(ToU64(parity), ToyEqParams::kPlainModulus, kPQ);
+    const auto parity_f = BuildPaperBootstrapFunctionRef(ToU64(lowbit), ToyEqParams::kPlainModulus, kPQ);
     const auto custom_f = BuildPaperBootstrapFunctionRef(ToU64(custom), ToyEqParams::kPlainModulus, kPQ);
 
     EXPECT_EQ(parity_f.size(), kPQ);
@@ -299,7 +299,7 @@ TEST(Equivalence, TensorNttMatchesCoeffTensorOnRandomInputs) {
 
 TEST(Equivalence, CurrentLutSemanticsMatchesIndependentPaperFunction) {
     const std::vector<std::vector<size_t>> plain_luts = {
-        bdf17::BuildParityLut<ToyEqParams>(),
+        bdf17::BuildLowBitLut<ToyEqParams>(),
         {0, 1, 1, 0, 1, 0, 0, 1},
     };
 
@@ -327,7 +327,7 @@ TEST(Equivalence, CurrentLutSemanticsMatchesIndependentPaperFunction) {
 
 TEST(Equivalence, PaperLutAndCurrentLutAgreeSemanticallyOnAllMessages) {
     const std::vector<std::vector<size_t>> plain_luts = {
-        bdf17::BuildParityLut<ToyEqParams>(),
+        bdf17::BuildLowBitLut<ToyEqParams>(),
         {0, 1, 1, 0, 1, 0, 0, 1},
     };
 
@@ -520,7 +520,7 @@ TEST(Equivalence, TraceNttMatchesTransportedPaperTraceRandom) {
 
 TEST(Equivalence, LutAndTraceSemanticsAgreeOnAllMessages) {
     const std::vector<std::vector<size_t>> plain_luts = {
-        bdf17::BuildParityLut<ToyEqParams>(),
+        bdf17::BuildLowBitLut<ToyEqParams>(),
         {0, 1, 1, 0, 1, 0, 0, 1},
     };
 

@@ -29,14 +29,14 @@ void Tensor(
 }
 
 template <typename PolyPT, typename PolyQT>
-EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> Tensor(const EvalPoly<PolyPT> &lhs, const EvalPoly<PolyQT> &rhs) {
+[[nodiscard]] EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> Tensor(const EvalPoly<PolyPT> &lhs, const EvalPoly<PolyQT> &rhs) {
     EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> out;
     Tensor(out, lhs, rhs);
     return out;
 }
 
 template <typename PolyPT, typename PolyQT>
-EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> GenKey(const std::vector<int64_t> &sk) {
+[[nodiscard]] EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> GenKey(const std::vector<int64_t> &sk) {
     auto sk_p_coeff = CoeffPoly<PolyPT>::FromSigned(std::span<const int64_t>(sk));
     EvalPoly<PolyQT> one_q;
     for (size_t i = 0; i < EvalPoly<PolyQT>::N; ++i) {
@@ -48,7 +48,9 @@ EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> GenKey(const std::vector<int64_t> &sk) {
 }
 
 template <typename Params = DefaultParams>
-typename Params::SchemePQ::RLWEKey TensorKey(const typename Params::SchemePt::RLWEKey &sk_p, const typename Params::SchemeQt::RLWEKey &sk_q) {
+[[nodiscard]] typename Params::SchemePQ::RLWEKey TensorKey(
+    const typename Params::SchemePt::RLWEKey &sk_p,
+    const typename Params::SchemeQt::RLWEKey &sk_q) {
     using SchemePQ = typename Params::SchemePQ;
     using EvalPt = typename Params::SchemePt::Eval;
     using EvalQt = typename Params::SchemeQt::Eval;
@@ -81,7 +83,9 @@ typename Params::SchemePQ::RLWEKey TensorKey(const typename Params::SchemePt::RL
 }
 
 template <typename Params = DefaultParams>
-typename Params::SchemePQ::RLWECiphertext TensorCt(const typename Params::SchemePt::RLWECiphertext &ct_p, const typename Params::SchemeQt::RLWECiphertext &ct_q) {
+[[nodiscard]] typename Params::SchemePQ::RLWECiphertext TensorCt(
+    const typename Params::SchemePt::RLWECiphertext &ct_p,
+    const typename Params::SchemeQt::RLWECiphertext &ct_q) {
     using SchemePQ = typename Params::SchemePQ;
 
     typename SchemePQ::RLWECiphertext ct;
@@ -118,7 +122,7 @@ struct TensorExpCrtState {
 };
 
 template <typename Params = DefaultParams>
-typename Params::SchemePQ::RLWECiphertext ApplyTensorExpCRT(
+[[nodiscard]] typename Params::SchemePQ::RLWECiphertext ApplyTensorExpCRT(
     TensorExpCrtState<Params> &state,
     const typename Params::SchemePt::RLWECiphertext &ct_p,
     const typename Params::SchemeQt::RLWECiphertext &ct_q) {
@@ -127,7 +131,7 @@ typename Params::SchemePQ::RLWECiphertext ApplyTensorExpCRT(
 }
 
 template <typename Params = DefaultParams>
-typename Params::SchemePQ::RLWECiphertext ExpCRT(
+[[nodiscard]] typename Params::SchemePQ::RLWECiphertext ExpCRT(
     TensorExpCrtState<Params> &state,
     const typename Params::SchemePt::RLWECiphertext &ct_p,
     const typename Params::SchemeQt::RLWECiphertext &ct_q,

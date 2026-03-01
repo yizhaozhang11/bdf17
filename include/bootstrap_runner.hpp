@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,8 @@ public:
         dim_reduction_active_ = dim_reduction_enabled_ && Params::kLweFrontendDimension != Params::kLweAccumulatorDimension;
 
         ValidateProfileOrThrow<Params>(dim_reduction_enabled_, config_.expcrt_variant);
+        const LutKind lut_kind = ParseLutKindOrThrow(config_.lut_name);
+        config_.lut_name = LutKindName(lut_kind);
 
         lwe_secret_frontend_ = GaussianSampler<Params::kLweFrontendDimension>::SampleSk(Params::kLweSecretDensity, rng_.engine);
         if (dim_reduction_active_) {
@@ -120,7 +123,7 @@ public:
             lwe_secret_accumulator_ = lwe_secret_frontend_;
         }
 
-        plain_lut_ = BuildParityLut<Params>();
+        plain_lut_ = BuildPlainLut(lut_kind);
         const auto lut_samples = BuildTensorLutSamples<Params>(plain_lut_);
         const auto lut_coeff = ConstructLutPoly<Params>(lut_samples);
         typename Params::PlanPQ plan_pq;
@@ -398,6 +401,20 @@ private:
         stats.extmult += nonzero;
         stats.galois += nonzero;
         stats.keyswitch += nonzero;
+    }
+
+    static std::vector<size_t> BuildPlainLut(const LutKind lut_kind) {
+        switch (lut_kind) {
+            case LutKind::LowBit:
+                return BuildLowBitLut<Params>();
+            case LutKind::HammingParity:
+                return BuildHammingParityLut<Params>();
+            case LutKind::Threshold:
+                return BuildThresholdLut<Params>(Params::kPlainModulus / 2);
+            case LutKind::TruthTable:
+                throw std::runtime_error("truth-table LUT requires explicit table data and is not supported by CLI config");
+        }
+        throw std::runtime_error("unknown LUT kind");
     }
 
     ExperimentConfig config_;

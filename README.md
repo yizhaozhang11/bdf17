@@ -56,7 +56,7 @@ At a high level, it performs the following pipeline:
 
 1. Sample an **LWE frontend secret**.
 2. Optionally sample a distinct **LWE accumulator secret** and generate a frontend-to-accumulator LWE key-switch key.
-3. Build a plaintext LUT (currently parity by default), lift it to tensor samples, and precompute its evaluation-domain polynomial.
+3. Build a plaintext LUT (currently low-bit by default), lift it to tensor samples, and precompute its evaluation-domain polynomial.
 4. Generate accumulator state:
    - fresh ring secrets for the `p`- and `q`-rings,
    - Galois key-switch keys,
