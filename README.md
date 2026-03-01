@@ -1,439 +1,415 @@
-# bdf17 — Prime-length NTT prototype for “Large FHE Gates from Tensored Homomorphic Accumulator” (BDF17)
+# bdf17
 
-> **Research prototype / not production crypto.**
->
-> This repository is an experiment-driven C++ prototype inspired by the paper:
->
-> *Large FHE Gates from Tensored Homomorphic Accumulator* (BDF17, IACR ePrint 2017/996).
->
-> The original authors also released a reference implementation (**Borogrove**) that targets the
-> paper’s 6‑bit-gate parameter set.
->
-> **Goal of this repo:** reproduce the BDF17 “large-gate bootstrapping” pipeline *and* explore
-> faster transform strategies (prime-length NTT + parameter/prime selection) to reduce the dominant FFT cost.
+Prime-length NTT / tensor-ring research prototype for experiments around **BDF17**:
 
----
+> *Large FHE Gates from Tensored Homomorphic Accumulator* (IACR ePrint 2017/996)
 
-## 1. What problem BDF17 solves (paper context)
+This repository is **not production cryptography**. It is a research codebase for:
 
-Bootstrapping in FHEW/TFHE-style schemes can be viewed as:
+- exploring a **prime-length NTT** backend for the BDF17-style accumulator pipeline,
+- testing a **typed polynomial / NTT-plan refactor**,
+- validating a **pair-basis tensor implementation** against the paper's folded `R_pq` view on toy instances,
+- and building an end-to-end demo with an **LWE frontend, bit packing, optional LWE key-switching, two accumulators, tensor combine, LUT application, trace, and LWE extraction**.
 
-1. a **linear** operation that computes (under encryption) the decryption inner product  
-   \(L_c(s) = b - \langle a, s \rangle\) (mod the LWE modulus), and
-2. a **nonlinear** map that extracts a fresh ciphertext encrypting a function of the resulting message.
-
-BDF17’s key idea is to make this bootstrapping compute **“large gates”**:
-
-- Instead of bootstrapping just one bit, set a plaintext modulus \(t = 2^k\),
-- Pack \(k\) input bits into one plaintext word \(m \in \mathbb{Z}_t\),
-- Evaluate an arbitrary lookup-table function \(f: \mathbb{Z}_t \to \mathbb{Z}_t\) *during bootstrapping*.
-
-This turns “one bootstrap = one arbitrary k‑input gate” (or even k‑to‑k with repeated extraction).
-
-### Tensored Homomorphic Accumulator (THA)
-
-Classic accumulator bootstrapping becomes expensive when \(t\) grows.
-BDF17 introduces a **tensored** approach:
-
-- Run **two smaller accumulators** in rings of degree \(p\) and \(q\),
-- Obtain encryptions of \(X^{m \bmod p}\) and \(Y^{m \bmod q}\),
-- Use a CRT/tensor construction (“ExpCRT”) to combine them into an encryption of \(Z^{m \bmod pq}\)
-  in a tensor ring of degree \(pq\),
-- Apply a **function extraction** that multiplies by a “function polynomial” \(F(Z)\), traces down,
-  and outputs a refreshed LWE ciphertext.
-
-### Paper’s demo target (for orientation)
-
-BDF17’s first implementation targets a **6‑bit input gate** (\(t=2^6=64\)).
-The paper reports (single-threaded on a laptop of that era):
-
-- one-time FFTW “wisdom” planning: ~68 minutes,
-- key preprocessing: ~38 seconds,
-- one 6‑input / 1‑output gate evaluation: ~6.4 seconds,
-  with the breakdown roughly: ~0.60 s per accumulator (two of them), ~4.0 s for the large key switch
-  inside function extraction, and ~0.55 s for “output-bit” related work,
-- memory for key material: ~9.2 GB.
-
-**Those numbers (and the parameter set behind them) are the “paper result” we eventually want to match.**
+The current code is much closer to an end-to-end prototype than the earlier version of this repo, but it is still **not a paper-faithful reproduction** of Borogrove. In particular, the default path still uses a custom `TensorTrick` ExpCRT variant; the explicit `ExpCrtVariant::Paper` path is present as an API option but is **not implemented yet**.
 
 ---
 
-## 2. What this repository currently is (and is not)
+## Status at a glance
 
-### What’s implemented today (high level)
+### Implemented now
 
-This repo implements the *shape* of the BDF17 pipeline:
+- **Prime-length circulant NTTs** with a mixed-radix `2^u * 3^v` kernel.
+- **Typed coefficient/evaluation polynomials** with reusable NTT plans.
+- **Backend selection** (`Auto`, `Scalar`, `Avx2`, `Avx512`) for NTT plans.
+- **Heap-backed polynomial storage** (`typed_poly.hpp`), which avoids the old inline giant-array design.
+- **LWE frontend**:
+  - message encoding / decoding,
+  - LWE encryption / decryption,
+  - modulus switching,
+  - little-endian bit packing,
+  - optional LWE dimension-reduction key-switching.
+- **Accumulator path**:
+  - bootstrapping key generation in the `p`- and `q`-rings,
+  - `Process()` / `ExtExpInner`-style accumulator evaluation,
+  - mod-switch into the tensor-stage rings.
+- **Tensor combine + extraction path**:
+  - current `TensorTrick` ExpCRT-like combine,
+  - LUT construction in the current tensor basis,
+  - LUT multiply, trace `R_p x R_q -> R_p`, and LWE extraction.
+- **Unit tests** for NTT correctness, backend equivalence, typed polynomial semantics, LWE frontend behavior, zero-sum RLWE `a` sampling, and toy-size equivalence checks against an independent paper-style reference model.
 
-1. **Accumulator step** in a \(p\)-ring and a \(q\)-ring  
-   (roughly paper’s `ExtExpInner` / “homomorphic accumulator”).
-2. **Tensor combine** the two outputs into a \(pq\)-ring ciphertext.
-3. **Function extraction** via:
-   - constructing a LUT polynomial `F`,
-   - multiplying ciphertext by `F` in the transform domain,
-   - tracing from \(R_{pq} \to R_p\),
-   - extracting an LWE-like `(a_out, b_out)` and verifying.
+### Still experimental / incomplete
 
-### What’s missing vs the paper / Borogrove reference
-
-This code is **not yet** an end-to-end faithful reproduction. Most notably it currently lacks:
-
-- A proper **LWE encryption frontend** (with noise) for input ciphertexts.
-  The demo synthesizes `(a,b)` using the secret key so it can test algebraic correctness.
-- The paper/Borogrove **“combination”** step that packs *multiple* encrypted bits into one word.
-- The explicit **LWE dimension reduction key switch** used in the paper demo
-  (e.g., 1439 → 600 in Borogrove).
-- A clearly separated implementation of the paper’s **ExpCRT** (Galois twists + rescale);
-  this repo currently performs a simplified “tensor + key switch” construction.
-- Stage-by-stage benchmarking and memory accounting comparable to Borogrove’s `stats/`.
-
-So: treat this as a *prototype kernel* for experimenting with transforms and ring choices,
-not as a drop-in reproduction.
+- `ExpCrtVariant::Paper` is **not implemented**.
+- The default parameter set is **not** the Borogrove parameter set.
+- The code does **not** claim full paper-level performance, memory, or noise reproduction.
+- This is **not constant-time** or hardened for production use.
 
 ---
 
-## 3. Repo layout & “where to start reading”
+## What the current executable does
 
-```
+The demo entrypoint is `src/main.cpp` and the executable target is `bdf17`.
+
+At a high level, it performs the following pipeline:
+
+1. Sample an **LWE frontend secret**.
+2. Optionally sample a distinct **LWE accumulator secret** and generate a frontend-to-accumulator LWE key-switch key.
+3. Build a plaintext LUT (currently parity by default), lift it to tensor samples, and precompute its evaluation-domain polynomial.
+4. Generate accumulator state:
+   - fresh ring secrets for the `p`- and `q`-rings,
+   - Galois key-switch keys,
+   - bootstrapping keys from the accumulator LWE secret.
+5. Generate tensor/ExpCRT state using the frontend secret plus the `p`- and `q`-ring secrets.
+6. For each trial:
+   - encrypt random input bits under the frontend secret,
+   - pack them little-endian into one LWE ciphertext over `Z_t` with `t = 64`,
+   - optionally key-switch to the accumulator LWE secret,
+   - modulus-switch into the accumulator input modulus,
+   - run the `p`- and `q`-ring accumulator processes,
+   - combine them with `ExpCRT(..., ExpCrtVariant::TensorTrick)`,
+   - apply the LUT, trace, and extract an LWE ciphertext,
+   - modulus-switch the extracted sample back to the frontend modulus if needed,
+   - decrypt and compare against the expected LUT value.
+
+By default the packed message is a 6-bit word because `kPlainModulus = 64`, so `MaxPackingBits(64) = 6`.
+
+---
+
+## Current relationship to the BDF17 paper / Borogrove
+
+This repository should be read as **"BDF17-inspired prototype with a different transform/backend strategy"**, not as a drop-in clone of Borogrove.
+
+### What matches the paper at a structural level
+
+- Two separate accumulators over rings of degrees `p` and `q`.
+- A tensor/combine stage before extraction.
+- LUT-based function evaluation during bootstrap.
+- A trace-and-extract path that returns to an LWE-like output sample.
+- BDF17-style **zero-sum CLWE `a` sampling** in `RLWEEncrypt`.
+- A frontend design that explicitly distinguishes:
+  - frontend modulus,
+  - accumulator-input modulus,
+  - extract modulus.
+
+### What is intentionally different right now
+
+- The default parameter set is tuned for a **smooth-prime NTT** experiment:
+  - `p = 1153`, `q = 1297`,
+  - with `p-1 = 1152 = 2^7 * 3^2`,
+  - and `q-1 = 1296 = 2^4 * 3^4`.
+- The current tensor/combine path uses `ExpCrtVariant::TensorTrick`, not the paper's explicit ExpCRT implementation.
+- The code largely works in a **direct tensor / pair basis** for `R_p x R_q` and then tests equivalence to the paper's folded `R_pq` picture on toy instances.
+
+### Important nuance about the equivalence tests
+
+The repo now includes a substantial toy-size equivalence suite (`tests/equivalence_test.cpp`) that compares the current pair-basis formulation against an independent paper-style folded reference model.
+
+Those tests check, in a **noiseless toy setting**, that:
+
+- the current LUT semantics agree with the paper bootstrap function,
+- the current fold / trace behavior matches the paper after the appropriate CRT transport / twists,
+- the current `TensorTrick` ciphertext phase matches the paper-style reference phase,
+- end-to-end LUT + trace semantics agree on toy examples.
+
+That is useful evidence that the current basis choice is mathematically aligned on small instances, but it is **not the same thing** as having implemented the paper's exact ExpCRT algorithm for the default large parameters.
+
+---
+
+## Default parameters
+
+The default parameter bundle lives in `include/params.hpp`.
+
+### LWE / plaintext parameters
+
+- `kLweFrontendDimension = 600`
+- `kLweAccumulatorDimension = 600`
+- `kPlainModulus = 64`
+- `kKeySwitchBase = 2^8`
+- `kLweKeySwitchBase = 2^8`
+- `kEnableLweDimReduction = false`
+- `kLweNoiseVar = 4.0`
+
+Since the frontend and accumulator dimensions are both `600`, the optional LWE dimension-reduction path is currently compiled in but **inactive by default**.
+
+### Ring / transform parameters
+
+Accumulator rings:
+
+- `NTTp = CircNTT<72057421557668737, 5, 1153, 5>`
+- `NTTq = CircNTT<72057421557668737, 5, 1297, 10>`
+
+Mod-switched rings used before tensor combine:
+
+- `NTTpt = CircNTT<108533126017, 10, 1153, 5>`
+- `NTTqt = CircNTT<108533126017, 10, 1297, 10>`
+
+Tensor ring:
+
+- `NTTpq = TensorNTTImpl<NTTpt, NTTqt>`
+
+Derived moduli / dimensions:
+
+- `kTensorDimension = 1153 * 1297 = 1495441`
+- `kAccumulatorInputModulus = kTensorDimension`
+- `kExtractModulus = NTTpq::Z::p = 108533126017`
+- `kFrontendModulus = kExtractModulus` (default)
+
+The code keeps the modulus roles separate even though the current default makes `kFrontendModulus == kExtractModulus`.
+
+---
+
+## Repository layout
+
+```text
 include/
-  ntt.h          Prime-length NTT + tensor NTT (fast path is 2^u*3^v)
-  poly.h         Polynomial wrapper with domain flag (coeff vs NTT)
-  zp.h           Zp arithmetic + Barrett fast multiply
-  rlwe.h         SchemeImpl interface: RLWE/RGSW, key switching, accumulator
-  rlwe-impl.h    Implementations (encrypt/decrypt/keyswitch/extmult/process)
+  accumulator.hpp     Accumulator state and ExtExpInner-style processing wrapper
+  expcrt.hpp          Tensor combine / ExpCRT state and current TensorTrick path
+  fun_extract.hpp     LUT construction, trace, and LWE extraction
+  lwe_frontend.hpp    LWE encrypt/decrypt, modswitch, packing, LWE key-switching
+  ntt.h               Prime-length NTT, circulant NTT, tensor NTT kernels
+  ntt_backend.hpp     Backend enum and compile-time backend detection
+  ntt_plan.hpp        Canonical forward/inverse plan wrapper with reusable workspace
+  params.hpp          Default parameter bundle
+  poly.h              Legacy compatibility aliases for coeff/eval polys
+  rlwe.h              SchemeImpl interface
+  rlwe-impl.h         SchemeImpl implementation
+  typed_poly.hpp      Heap-backed typed coefficient/evaluation polynomial container
+  zp.h                Modular arithmetic helpers
 
 src/
-  bdf17.cpp      End-to-end demo of the current pipeline (single file “driver”)
-
-benchmarks/
-  benchmark.cpp  Microbenchmarks of NTT kernels (Google Benchmark)
-
-scripts/
-  gen.sage       Helper for generating primes/primitive roots satisfying NTT constraints
+  main.cpp            End-to-end demo driver
 
 tests/
-  test.cpp       (currently empty scaffold)
+  test.cpp            NTT, tensor NTT, boundary-vector, Galois, zero-sum RLWE tests
+  typed_poly_test.cpp Typed polynomial semantics
+  ntt_plan_test.cpp   Plan/backends/workspace tests
+  lwe_frontend_test.cpp
+                      LWE encode/decode, packing, and LWE key-switch tests
+  equivalence_test.cpp
+                      Toy-size equivalence checks vs paper-style folded semantics
+  equivalence_ref.hpp Reference helpers used by equivalence_test.cpp
+
+benchmarks/
+  benchmark.cpp       NTT-plan microbenchmarks
+
+scripts/
+  gen.sage            Helper for generating smooth-prime-friendly NTT moduli
 ```
 
-If you’re new:
+---
 
-1. Read `src/bdf17.cpp` first (it shows the full pipeline in one place).
-2. Then read `include/rlwe.h` + `include/rlwe-impl.h` (ciphertexts/keyswitch/accumulator).
-3. Finally read `include/ntt.h` (prime-length NTT implementation + tensor NTT).
+## Transform strategy
+
+The central performance experiment in this repo is the use of **prime-length NTTs** for the `p`- and `q`-rings.
+
+For a prime ring degree `O`, the implementation uses a prime-length transform built from:
+
+- a Rader-style reduction from size `O` to `O - 1`, and
+- a mixed-radix kernel specialized to the case where `O - 1 = 2^u * 3^v`.
+
+This is why the default experiment uses:
+
+- `1153 - 1 = 1152 = 2^7 * 3^2`
+- `1297 - 1 = 1296 = 2^4 * 3^4`
+
+instead of the Borogrove demo's `1439` and `1447`.
+
+The code now exposes this transform stack through:
+
+- `CanonicalNttPlan<Transform, Backend>`
+- typed coefficient and evaluation polys (`CoeffPoly`, `EvalPoly`)
+- reusable workspace allocation in `CanonicalNttPlan::Workspace`
+
+Backend selection is handled through `ntt_backend.hpp` and the NTT plan supports:
+
+- `Backend::Auto`
+- `Backend::Scalar`
+- `Backend::Avx2`
+- `Backend::Avx512`
+
+The tests compare these backends on toy rings, the current default rings, and tensor rings where possible.
 
 ---
 
-## 4. Mathematical model & encoding conventions used here
+## Build
 
-### Rings
-
-For a ring degree `O` (prime in the current parameter choices), we work in the **circulant ring**
-\(R_O = \mathbb{Z}_Q[X]/(X^O - 1)\).
-
-- `Poly<NTT>` stores a polynomial of length `NTT::N`.
-- When using `CircNTT<..., O, ...>`, `NTT::N == O` and the transform is an NTT of size `O`
-  implemented via a prime-length method (see below).
-
-The tensor ring is the product ring of degrees `p*q` (implemented as a 2D tensor NTT):
-
-\[
-R_{pq} \cong \mathbb{Z}_Q[X]/(X^p-1) \otimes \mathbb{Z}_Q[Y]/(Y^q-1).
-\]
-
-### Ciphertext shapes in `SchemeImpl`
-
-`SchemeImpl<Poly,B>` is a minimal RLWE/RGSW toolchain:
-
-- **RLWE secret key**: `RLWEKey` is `std::vector<Poly>` of size `k`
-- **RLWE ciphertext**: `RLWECiphertext` is `std::vector<Poly>` of size `k+1`
-  - first `k` polys are the `a_i`
-  - last poly is the `b`
-- **RGSW ciphertext**: `RGSWCiphertext` is a pair of gadget ciphertexts
-  `(ct_for_m*s, ct_for_m)`.
-
-`Poly::is_coeff` indicates the domain:
-
-- `is_coeff = true`: coefficient domain
-- `is_coeff = false`: NTT domain
-
-Important invariant:
-- `Poly * Poly` multiplication is only allowed in NTT domain (`is_coeff=false`),
-  and is pointwise multiplication.
-
-### Message encoding used by the demo
-
-The demo uses:
-
-- plaintext modulus `Qplain = 64` (paper uses `t=64` as well)
-- an “LWE modulus” effectively of size `pq = p*q`.
-
-The driver synthesizes an LWE-like sample `(a,b)` so that:
-
-\[
-b - \langle a, s \rangle \equiv \left\lfloor \frac{pq}{t} \cdot m \right\rceil \pmod{pq},
-\]
-
-where `m = b0` is the intended plaintext in `[0, t)`.
-
-The accumulator step then aims to produce an RLWE encryption of an exponent gadget
-corresponding to that encoded message (conceptually `X^m` in the exponent space).
-
----
-
-## 5. Pipeline overview and mapping to code
-
-This repo’s `main()` in `src/bdf17.cpp` performs:
-
-### Step A — choose predicate `f` (LUT)
-
-- `f_plain`: the function on plaintext messages `m ∈ {0,…,t-1}`
-- `f_ct`: an expanded LUT of length `pq` which accounts for modulus switching / scaling
-  from `pq` back to `t`.
-
-Currently the demo sets:
-- `f_plain[m] = m & 1` (parity of the 6-bit word)
-
-Then:
-- `ConstructF(f_ct)` builds a polynomial `F` over the `pq`-ring used for extraction,
-  and `F.ToNTT()` prepares it for pointwise multiplication.
-
-### Step B — keys & evaluation keys
-
-- `sk`: an LWE secret (length `n=600`) sampled as sparse ternary
-- `skp`, `skq`: ring secrets for the `p`- and `q`-rings
-- `schemeP`, `schemeQ`: `SchemeImpl` instances in `p`-ring and `q`-ring
-  - `GaloisKeyGen()` precomputes galois key-switch keys for automorphisms
-  - `BootstrappingKeyGen(sk)` encrypts the LWE secret components in RGSW form
-- `schemePQ`: a `pq`-ring scheme used for the tensor/key-switch part
-- `TensorKey(...)` builds a 3-component tensor secret key (see “ExpCRT note” below)
-- `tensorBK = schemePQ.KeySwitchGen(skpq, skp0)` builds a key switch from the 3‑key tensor secret
-  down to an embedded 1‑key secret used for extraction.
-
-### Step C — accumulator / “linear” bootstrapping part
-
-For each randomized test input, we build synthetic `(a,b)` and run:
-
-- `schemeP.Process(BKp, a, b, Qplain)`  
-- `schemeQ.Process(BKq, a, b, Qplain)`
-
-`Process()` is the main accumulator routine and corresponds to the paper’s
-“ExtExpInner / homomorphic accumulator” idea:
-it repeatedly applies automorphisms (Galois conjugates), key switching,
-and external multiplication by RGSW encryptions of secret components.
-
-Then the demo mod-switches these ciphertexts into a second modulus (the “tensored stage modulus”):
-
-- `ctp = SchemeP::ModSwitch<SchemePt>(...)`
-- `ctq = SchemeQ::ModSwitch<SchemeQt>(...)`
-
-### Step D — tensor combine (“ExpCRT-like”)
-
-The repo currently combines `ctp` and `ctq` via:
-
-- `ctpqt = TensorCt(ctp, ctq)` which creates a 2×2 tensor RLWE ciphertext (size 4)
-- `tensor_ct = schemePQ.KeySwitch(ctpqt, tensorBK)` to reduce it back to a standard 2‑poly RLWE ciphertext
-
-> **Note:** In the BDF17 paper this stage is a specific construction called **ExpCRT**
-> (Galois twists + tensor product + rescaling) designed to control noise and scaling.
-> This repo currently performs a simplified construction that is useful for experimentation,
-> but should be treated as “not yet paper-equivalent” until proven/validated.
-
-### Step E — function extraction & LWE output
-
-- Multiply by LUT poly:
-  - `tensor_ct[0] = F * tensor_ct[0]`
-  - `tensor_ct[1] = F * tensor_ct[1]`
-- Trace down:
-  - `ct_trace = { TracePQtoP(tensor_ct[0]), TracePQtoP(tensor_ct[1]) }`
-- Extract `(a_out, b_out)` by reading coefficients of the traced ciphertext.
-
-Finally the demo **verifies correctness** by decrypting with the secret key `sk`
-(“check, not a production decryption API”).
-
----
-
-## 6. Prime-length NTT & parameter/prime selection tricks (the “novel FFT” angle)
-
-A major motivation for this repo is to avoid the heavy FFTW cost reported in the paper
-(especially the huge `R_{pq}` FFTs).
-
-### What we do here
-
-We pick ring degrees `p` and `q` such that:
-
-- `p` and `q` are prime,
-- `p-1` and `q-1` are **very smooth**, specifically of the form `2^u * 3^v`.
-
-Example (current demo):
-- `p = 1153`, so `p-1 = 1152 = 2^7 * 3^2`
-- `q = 1297`, so `q-1 = 1296 = 2^4 * 3^4`
-
-This allows the prime-length NTT (size `p` or `q`) to reduce to a fast mixed-radix transform
-on length `p-1` / `q-1` using only radix‑2 and radix‑3 butterflies (implemented in `CT23NTT`).
-
-### How the NTT works in code
-
-- `NTT<p,g,O,w>` implements a prime-length NTT over the `O-1` non-zero indices
-  using a Rader-style permutation (`gi`, `gi_inv`) and a CT23 transform.
-- `CircNTT<p,g,O,w>` lifts that into a size-`O` NTT suitable for cyclic convolution
-  in `Z_p[X]/(X^O-1)` by handling the DC term separately.
-- `TensorNTTImpl<NTTp,NTTq>` implements a 2D NTT for the tensor ring by applying:
-  - NTT along the `q` dimension for each `p` row, then
-  - NTT along the `p` dimension for each `q` column.
-
-### Modulus selection
-
-To run NTTs of size `O` and `O-1`, we need a prime modulus `P` such that:
-
-- `P ≡ 1 (mod O*(O-1))`
-
-Because `p` and `q` rings share the same modulus in the demo, we also require:
-
-- `P ≡ 1 (mod lcm(p*(p-1), q*(q-1)))`
-
-The helper script `scripts/gen.sage` searches for such primes and prints template parameters.
-
----
-
-## 7. Building & running
-
-### Dependencies
-
-Core code:
-- C++23 compiler
-- AVX2 (the NTT kernel uses `<immintrin.h>`)
-- OpenMP (enabled via `-fopenmp` in the top-level CMake)
-
-Optional:
-- GoogleTest (for tests; fetched via `FetchContent` if not installed)
-- Google Benchmark (for benchmarks; fetched via `FetchContent` if not installed)
-
-### Build (default)
+### CMake build
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Run the demo:
+Useful options:
+
+```bash
+- DENABLE_BENCHMARKS=ON|OFF   # default ON
+- DENABLE_AVX2=ON|OFF         # default ON
+- DENABLE_AVX512=ON|OFF       # default OFF
+```
+
+### Dependency behavior
+
+- Tests are always enabled by the top-level `CMakeLists.txt`.
+- `tests/CMakeLists.txt` will try `find_package(GTest)` first and otherwise fall back to `FetchContent`.
+- Benchmarks are optional; if enabled, `benchmarks/CMakeLists.txt` will try `find_package(benchmark)` first and otherwise fall back to `FetchContent`.
+
+So if you do not have system-installed GTest / Google Benchmark, CMake may attempt to download them.
+
+### Minimal demo-only build without CMake tests/benchmarks
+
+For quick local experimentation with just `src/main.cpp`, a direct compile also works:
+
+```bash
+g++ -std=c++23 -O3 -march=native -fopenmp -Iinclude src/main.cpp -o bdf17_demo
+```
+
+To mimic the default AVX2-enabled CMake path on an AVX2-capable machine, add:
+
+```bash
+-DBDF17_ENABLE_AVX2=1 -mavx2
+```
+
+---
+
+## Run
+
+### End-to-end demo
 
 ```bash
 ./build/bdf17
 ```
 
-Run benchmarks:
+The demo prints stage timings and, for each trial, the extracted result and the expected LUT value.
+
+### Tests
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Optional large edge-case NTT matrix tests are gated behind an environment variable:
+
+```bash
+BDF17_ENABLE_EXTENDED_NTT_TESTS=1 ctest --test-dir build --output-on-failure -R NTTMatrix
+```
+
+### Benchmarks
 
 ```bash
 ./build/bdf17_benchmarks
 ```
 
-Run tests:
-
-```bash
-ctest --test-dir build
-```
-
-Run extended NTT edge-case matrix tests (includes large `2^u*3^v` cases):
-
-```bash
-BDF17_ENABLE_EXTENDED_NTT_TESTS=1 ctest --test-dir build -R NTTMatrix
-```
+The current benchmark target focuses on NTT-plan microbenchmarks rather than full bootstrap timings.
 
 ---
 
-## 8. Known engineering hazards / gotchas (important for contributors)
+## What the tests cover
 
-1. **Huge PQ polynomials can overflow the stack**  
-   `Poly` stores coefficients as `uint64_t a[N]` inline.
-   For `pq = p*q` this is ~1.5M coefficients → ~12MB per polynomial.
-   Returning/allocating `PolyPQ` by value inside functions can exceed typical stack limits.
+### NTT / tensor NTT
 
-   If you see crashes early in execution: fix by switching PQ polys to heap storage
-   or by rewriting tensor/LUT code to use output buffers / move-only types.
+- roundtrip correctness,
+- linearity,
+- boundary-vector stress cases,
+- separable tensor-NTT agreement,
+- optional larger `(u, v)` mixed-radix edge cases.
 
-2. **Static scratch buffers are not thread-safe**  
-   The NTT kernels use `static uint64_t reg[...]` as workspace.
-   This is not safe with OpenMP or multi-threaded use.
-   Prefer a thread-local or explicit “workspace” object.
+### NTT plans and backends
 
-3. **Domain discipline matters**  
-   `Poly::operator*` assumes both operands are in NTT domain.
-   Many functions do `ToCoeff()` / `ToNTT()` internally; avoid repeated toggling in hot paths.
+- plan forward/inverse matches raw transform semantics,
+- `Auto` matches scalar,
+- AVX2/AVX512 (when compiled) match scalar,
+- reusable workspace behavior.
 
-4. **CT23 assumes `O-1` factors only into 2s and 3s**  
-   The current fast NTT path is only correct under that assumption.
-   If you change `p`/`q`, add invariant checks (or implement a more general mixed radix).
+### Typed polynomial layer
 
----
+- signed / unsigned coefficient normalization,
+- monomial construction,
+- coefficient-domain arithmetic,
+- evaluation-domain pointwise multiplication,
+- coefficient- and evaluation-domain Galois actions.
 
-## 9. How to modify the demo
+### LWE frontend
 
-### Change the bootstrapped function `f`
+- message encode/decode,
+- deterministic encrypt/decrypt tests,
+- little-endian bit packing,
+- rejection of over-wide packing,
+- LWE key-switch correctness.
 
-In `src/bdf17.cpp`:
+### RLWE / paper-alignment checks
 
-- `f_plain` defines the function on `m ∈ [0, Qplain)`.
-- `f_ct` expands it to `[0, pq)` after scaling.
-
-Example: majority on a 6-bit word (toy):
-
-```cpp
-for (size_t m = 0; m < Qplain; m++) {
-    f_plain[m] = (__builtin_popcount((unsigned)m) >= 3);
-}
-```
-
-### Change the ring degrees (p, q)
-
-- Update the `using NTTp = ...` / `using NTTq = ...` lines.
-- Regenerate suitable NTT modulus primes and primitive roots using `scripts/gen.sage`
-  (or an extended version for your desired bit-length).
-
-Remember:
-- This repo’s NTT prefers `p-1` and `q-1` to be 2/3-smooth.
-- If you move toward the paper’s `p=1439, q=1447`, you will need a different transform strategy
-  (or a generalized NTT) because `1439-1` and `1447-1` are not 2/3-smooth.
+- zero-sum `a` sampling in `RLWEEncrypt`,
+- toy-size equivalence between the current tensor basis and a paper-style folded reference,
+- noiseless semantic agreement for LUT + trace behavior.
 
 ---
 
-## 10. Roadmap toward “paper reproduction + faster FFT” (suggested TODOs)
+## Notable implementation details
 
-If the goal is a credible reproduction and a performance story, the next steps are:
+### Typed polynomials are heap-backed now
 
-### Reproduction completeness
-- [ ] Implement **true LWE encryption** of inputs (with noise) instead of synthesizing `(a,b)`.
-- [ ] Implement the **combination step** to pack multiple encrypted bits into one word `m`.
-- [ ] Implement the paper’s **LWE dimension reduction key switch** (e.g., 1439 → 600).
-- [ ] Implement a clearly separated **ExpCRT** stage (paper’s twists + rescale),
-      or provide a proof/tests that the current tensor+KS variant is equivalent.
+`typed_poly.hpp` stores coefficients in `std::unique_ptr<uint64_t[]>` rather than inline fixed-size arrays.
+This makes the polynomial representation much safer for large tensor-ring objects and is one of the main engineering improvements relative to the earlier prototype state.
 
-### Transform and parameter experiments
-- [ ] Add a parameter search tool (Sage/Python) for selecting `p,q,P,g,w`
-      under both correctness/noise constraints and transform smoothness constraints.
-- [ ] Compare:
-      - FFTW padding approach (Borogrove style),
-      - prime-length NTT (this repo),
-      - Bluestein/Chirp-Z style,
-      - mixed-radix generalized NTT (if allowing small extra primes like 5,7,11).
+### Zero-sum CLWE sampling is implemented
 
-### Engineering / benchmarking
-- [ ] Fix memory model for PQ polynomials (heap-backed, move-only).
-- [ ] Add stage-by-stage timers and peak memory accounting comparable to Borogrove.
-- [ ] Add correctness tests (NTT roundtrip, multiplication vs naive, keyswitch, extmult, end-to-end).
-- [ ] Make build flags configurable (avoid forcing `-Werror`, `-march=native`, `-mavx2` globally).
+`SchemeImpl::RLWEEncrypt` samples the RLWE `a` term in the **sum-zero subspace** by choosing random coefficients for indices `1..N-1` and then setting index `0` so the coefficient sum is `0 mod Q`.
+
+That aligns the ring-side sampling more closely with the BDF17 / Borogrove CLWE model.
+
+### Frontend / internal modulus flow is explicit
+
+The main driver keeps three distinct modulus roles visible:
+
+- `q_frontend`
+- `q_accumulator_input`
+- `q_extract_internal`
+
+This makes it easier to experiment with the paper-style `Q0 -> pq -> Q_extract -> Q0` shape, even though the default parameters currently choose `q_frontend == q_extract_internal`.
 
 ---
 
-## 11. References
+## Current limitations / open gaps
 
-Paper and reference implementation (search by identifier/name):
+These are the main things to keep in mind when reading or extending the code:
 
-```text
-BDF17 paper: “Large FHE Gates from Tensored Homomorphic Accumulator”
-IACR ePrint: 2017/996
+1. **Paper ExpCRT is still missing**
+   - `ExpCrtVariant::Paper` throws at runtime.
+   - The active path is `ExpCrtVariant::TensorTrick`.
 
-Reference code by the authors (Borogrove):
-https://github.com/gbonnoron/Borogrove
-```
+2. **The default parameters are experimental, not Borogrove-faithful**
+   - The repo is currently tuned for the smooth-prime NTT experiment.
 
-Related background families:
-- FHEW / TFHE bootstrapping (accumulator-based gate bootstrapping)
+3. **The benchmark target is still transform-centric**
+   - there is no Borogrove-style full bootstrap timing / memory breakdown yet.
+
+4. **No security estimator integration**
+   - current defaults are engineering parameters for experimentation, not a finished security story.
+
+5. **Not production crypto**
+   - no constant-time claims,
+   - no side-channel hardening,
+   - no API stability guarantees.
+
+---
+
+## Suggested next steps
+
+If your goal is to move this toward a paper-comparison artifact, the most meaningful next steps are:
+
+- implement the actual `ExpCrtVariant::Paper` path,
+- add stage-by-stage bootstrap benchmarking and memory accounting,
+- introduce alternate parameter bundles (for example a Borogrove-style comparison profile),
+- add a parameter search / validation flow that connects transform smoothness, modulus constraints, and correctness/noise constraints,
+- keep extending the equivalence tests so the pair-basis and folded-basis stories remain easy to check.
+
+---
+
+## References
+
+- BDF17: *Large FHE Gates from Tensored Homomorphic Accumulator* (IACR ePrint 2017/996)
+- Borogrove: the reference implementation released by the paper's authors
+
