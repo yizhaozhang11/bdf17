@@ -199,10 +199,15 @@ template <typename Params = DefaultParams>
 [[nodiscard]] typename Params::SchemePt::RLWECiphertext ApplyLutAndTrace(
     typename Params::SchemePQ::RLWECiphertext tensor_ct,
     const typename Params::SchemePQ::Eval &lut_eval) {
-    tensor_ct[0] = lut_eval * tensor_ct[0];
-    tensor_ct[1] = lut_eval * tensor_ct[1];
+    auto ct2 = Params::SchemePQ::ToRlweCt2(tensor_ct);
+    ct2.a = lut_eval * ct2.a;
+    ct2.b = lut_eval * ct2.b;
 
-    return {TracePQtoP<Params>(tensor_ct[0]), TracePQtoP<Params>(tensor_ct[1])};
+    typename Params::SchemePt::RlweCt2 traced{
+        TracePQtoP<Params>(ct2.a),
+        TracePQtoP<Params>(ct2.b),
+    };
+    return Params::SchemePt::FromRlweCt2(traced);
 }
 
 template <typename Params = DefaultParams>
@@ -210,12 +215,14 @@ template <typename Params = DefaultParams>
     using SchemePt = typename Params::SchemePt;
     using EvalP = typename SchemePt::Eval;
 
+    const auto ct2 = SchemePt::ToRlweCt2(ct_trace);
+
     ExtractedLweSample<Params> out;
     out.a.resize(Params::kLweFrontendDimension);
-    out.b = TracePtoZ<Params>(ct_trace[1]);
+    out.b = TracePtoZ<Params>(ct2.b);
 
     typename SchemePt::Plan plan_p;
-    auto a_coeff = plan_p.inverse(ct_trace[0]);
+    auto a_coeff = plan_p.inverse(ct2.a);
     out.a[0] = a_coeff[0];
     for (size_t i = 1; i < Params::kLweFrontendDimension; ++i) {
         out.a[i] = a_coeff[EvalP::N - i];

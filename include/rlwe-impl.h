@@ -41,6 +41,11 @@ std::pair<T1, T2> SchemeImpl<Transform, B, Plan>::GaloisConjugate(const std::pai
 }
 
 template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::GaloisConjugate(const RlweCt2 &x, const size_t &a) {
+    return {GaloisConjugate(x.a, a), GaloisConjugate(x.b, a)};
+}
+
+template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::Eval SchemeImpl<Transform, B, Plan>::GaloisConjugate(const Eval &x, const size_t &a) {
     return GaloisApply(x, a);
 }
@@ -48,6 +53,42 @@ typename SchemeImpl<Transform, B, Plan>::Eval SchemeImpl<Transform, B, Plan>::Ga
 template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::Coeff SchemeImpl<Transform, B, Plan>::GaloisConjugate(const Coeff &x, const size_t &a) {
     return GaloisApply(x, a);
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::FromRlweCt2(const RlweCt2 &ct) {
+    RLWECiphertext out;
+    out.reserve(2);
+    out.push_back(ct.a);
+    out.push_back(ct.b);
+    return out;
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::ToRlweCt2(const RLWECiphertext &ct) {
+    if (ct.size() != 2) {
+        throw std::runtime_error("expected RLWE ciphertext of size 2");
+    }
+    return {ct[0], ct[1]};
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::FromTensorCt4(const TensorCt4 &ct) {
+    RLWECiphertext out;
+    out.reserve(4);
+    out.push_back(ct.c0);
+    out.push_back(ct.c1);
+    out.push_back(ct.c2);
+    out.push_back(ct.c3);
+    return out;
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::TensorCt4 SchemeImpl<Transform, B, Plan>::ToTensorCt4(const RLWECiphertext &ct) {
+    if (ct.size() != 4) {
+        throw std::runtime_error("expected tensor ciphertext of size 4");
+    }
+    return {ct[0], ct[1], ct[2], ct[3]};
 }
 
 template <class Transform, uint64_t B, class Plan>
@@ -213,13 +254,39 @@ template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::KeySwitch(
     const RLWECiphertext &ct,
     const RLWESwitchingKey &k) {
+    const Plan plan;
+    return KeySwitchImpl(ct, k, plan);
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::KeySwitch(
+    const RlweCt2 &ct,
+    const RLWESwitchingKey &k) {
+    const Plan plan;
+    return KeySwitchCt2(ct, k, plan);
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::KeySwitchImpl(
+    const RLWECiphertext &ct,
+    const RLWESwitchingKey &k,
+    const Plan &plan) {
+    if (ct.empty()) {
+        throw std::runtime_error("KeySwitch requires non-empty ciphertext");
+    }
+    if (k.empty() || k[0].empty() || k[0][0].empty()) {
+        throw std::runtime_error("KeySwitch requires non-empty switching key");
+    }
+
     const size_t dim_in = ct.size() - 1;
     const size_t dim_out = k[0][0].size() - 1;
+    if (k.size() != dim_in) {
+        throw std::runtime_error("KeySwitch input dimension mismatch");
+    }
 
     RLWECiphertext result(dim_out + 1);
     result[dim_out] = ct[dim_in];
 
-    Plan plan;
     for (size_t i = 0; i < dim_in; i++) {
         const auto digits = BaseDecomposeToEval(ct[i], plan);
         for (size_t j = 0; j < G; j++) {
@@ -232,12 +299,29 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
 }
 
 template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::KeySwitchCt2(
+    const RlweCt2 &ct,
+    const RLWESwitchingKey &k,
+    const Plan &plan) {
+    const auto switched = KeySwitchImpl(FromRlweCt2(ct), k, plan);
+    return ToRlweCt2(switched);
+}
+
+template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::Mult(
     Eval a,
     const RLWEGadgetCiphertext &ct) {
+    const Plan plan;
+    return MultImpl(std::move(a), ct, plan);
+}
+
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::MultImpl(
+    Eval a,
+    const RLWEGadgetCiphertext &ct,
+    const Plan &plan) {
     const size_t dim_out = ct[0].size() - 1;
 
-    Plan plan;
     const auto digits = BaseDecomposeToEval(a, plan);
 
     RLWECiphertext result(dim_out + 1);
@@ -252,23 +336,34 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
 }
 
 template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::ExtMult(
+    const RlweCt2 &ct,
+    const RGSWCiphertext &ctGSW) {
+    const Plan plan;
+    return ExtMultImpl(ct, ctGSW, plan);
+}
+
+template <class Transform, uint64_t B, class Plan>
 typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B, Plan>::ExtMult(
     const RLWECiphertext &ct,
     const RGSWCiphertext &ctGSW) {
-    if (ct.size() != 2) {
-        throw std::runtime_error("RGSW multiplication requires a ciphertext of size 2");
-    }
+    return FromRlweCt2(ExtMult(ToRlweCt2(ct), ctGSW));
+}
 
+template <class Transform, uint64_t B, class Plan>
+typename SchemeImpl<Transform, B, Plan>::RlweCt2 SchemeImpl<Transform, B, Plan>::ExtMultImpl(
+    const RlweCt2 &ct,
+    const RGSWCiphertext &ctGSW,
+    const Plan &plan) {
     Eval ra;
     Eval rb;
 
-    Eval a = ct[0];
-    Eval b = ct[1];
+    Eval a = ct.a;
+    Eval b = ct.b;
     for (size_t i = 0; i < Eval::N; i++) {
         a[i] = Eval::Z::Sub(0, a[i]);
     }
 
-    Plan plan;
     const auto a_digits = BaseDecomposeToEval(a, plan);
     const auto b_digits = BaseDecomposeToEval(b, plan);
 
@@ -276,7 +371,7 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
         ra = ra + b_digits[i] * ctGSW.second[i][0] + a_digits[i] * ctGSW.first[i][0];
         rb = rb + b_digits[i] * ctGSW.second[i][1] + a_digits[i] * ctGSW.first[i][1];
     }
-    return {ra, rb};
+    return RlweCt2{ra, rb};
 }
 
 template <class Transform, uint64_t B, class Plan>
@@ -316,7 +411,7 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
     cb_coeff[static_cast<size_t>(b)] = Q / q_plain;
 
     Eval cb = plan_.forward(cb_coeff);
-    RLWECiphertext ct{ca, cb};
+    RlweCt2 ct{ca, cb};
 
     uint64_t t = 1;
     for (size_t i = 0; i < a.size(); i++) {
@@ -331,17 +426,17 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
             t = Zp<Eval::O>::Mul(t, Zp<Eval::O>::Pow(static_cast<uint64_t>(a[i]), Eval::O - 2));
             if (t != 1) {
                 ct = GaloisConjugate(ct, t);
-                ct = KeySwitch(ct, ksk_galois[t]);
+                ct = KeySwitchCt2(ct, ksk_galois[t], plan_);
             }
-            ct = ExtMult(ct, bk[i]);
+            ct = ExtMultImpl(ct, bk[i], plan_);
             t = static_cast<uint64_t>(a[i]);
         }
     }
     if (t != 1) {
         ct = GaloisConjugate(ct, t);
-        ct = KeySwitch(ct, ksk_galois[t]);
+        ct = KeySwitchCt2(ct, ksk_galois[t], plan_);
     }
-    return ct;
+    return FromRlweCt2(ct);
 }
 
 #endif // RLWE_IMPL_H

@@ -58,6 +58,7 @@ template <typename Params = DefaultParams>
     using Z = typename Params::Z;
 
     typename SchemePQ::RLWEKey sk_pq;
+    sk_pq.reserve(3);
 
     EvalPt skp0 = sk_p[0];
     EvalQt skq0 = sk_q[0];
@@ -87,14 +88,19 @@ template <typename Params = DefaultParams>
     const typename Params::SchemePt::RLWECiphertext &ct_p,
     const typename Params::SchemeQt::RLWECiphertext &ct_q) {
     using SchemePQ = typename Params::SchemePQ;
+    using SchemePt = typename Params::SchemePt;
+    using SchemeQt = typename Params::SchemeQt;
 
-    typename SchemePQ::RLWECiphertext ct;
+    const auto ct2_p = SchemePt::ToRlweCt2(ct_p);
+    const auto ct2_q = SchemeQt::ToRlweCt2(ct_q);
     const uint64_t scaling_factor = SchemePQ::Q - Params::kPlainModulus;
-    ct.push_back(Tensor(ct_p[0], ct_q[0]) * scaling_factor);
-    ct.push_back(Tensor(ct_p[0], ct_q[1]) * scaling_factor);
-    ct.push_back(Tensor(ct_p[1], ct_q[0]) * scaling_factor);
-    ct.push_back(Tensor(ct_p[1], ct_q[1]) * scaling_factor);
-    return ct;
+    typename SchemePQ::TensorCt4 ct4{
+        Tensor(ct2_p.a, ct2_q.a) * scaling_factor,
+        Tensor(ct2_p.a, ct2_q.b) * scaling_factor,
+        Tensor(ct2_p.b, ct2_q.a) * scaling_factor,
+        Tensor(ct2_p.b, ct2_q.b) * scaling_factor,
+    };
+    return SchemePQ::FromTensorCt4(ct4);
 }
 
 template <typename Params = DefaultParams>
