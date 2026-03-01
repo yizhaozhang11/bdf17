@@ -3,8 +3,8 @@
 
 #include "typed_poly.hpp"
 
-// Legacy include retained for compatibility with include paths.
-// Use CoeffPoly<Transform> and EvalPoly<Transform> directly.
+// Compatibility-only include retained for existing call sites.
+// New code should use CoeffPoly<Transform> and EvalPoly<Transform> directly.
 template <class Transform>
 using PolyCoeff = CoeffPoly<Transform>;
 

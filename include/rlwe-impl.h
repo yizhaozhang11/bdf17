@@ -8,7 +8,7 @@ SchemeImpl<Transform, B, Plan>::SchemeImpl()
 template <class Transform, uint64_t B, class Plan>
 SchemeImpl<Transform, B, Plan>::SchemeImpl(std::vector<int64_t> skVec)
     : sk(1), skp(), engine(std::random_device{}()), distribution(0, Q - 1), plan_() {
-    Coeff sk_coeff = Coeff::template FromSigned<int64_t>(skVec);
+    Coeff sk_coeff = Coeff::FromSigned(std::span<const int64_t>(skVec));
     skp = plan_.forward(sk_coeff);
     sk[0] = skp;
 }
@@ -76,7 +76,7 @@ typename SchemeImpl<Transform, B, Plan>::RLWECiphertext SchemeImpl<Transform, B,
     }
 
     const auto rand = GaussianSampler<Eval::N>::GetInstance().SampleE(4.0);
-    Coeff e_coeff = Coeff::template FromSigned<int64_t>(rand);
+    Coeff e_coeff = Coeff::FromSigned(std::span<const int64_t>(rand));
     Eval e_eval = plan_.forward(e_coeff);
 
     ct.push_back(result + e_eval + m * (Q / q_plain));

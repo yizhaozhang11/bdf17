@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -74,7 +75,7 @@ public:
 
     using Coeff = CoeffPoly<Transform>;
     using Eval = EvalPoly<Transform>;
-    using Poly = Eval; // Transitional alias while non-RLWE code is migrated.
+    using Poly = Eval; // Compatibility-only alias; prefer Coeff/Eval in new code.
 
     using RLWEKey = std::vector<Eval>;
     using RLWECiphertext = std::vector<Eval>;

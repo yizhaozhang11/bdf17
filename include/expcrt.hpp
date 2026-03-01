@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -40,7 +41,7 @@ EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> Tensor(const EvalPoly<PolyPT> &lhs, cons
 
 template <typename PolyPT, typename PolyQT>
 EvalPoly<TensorNTTImpl<PolyPT, PolyQT>> GenKey(const std::vector<int64_t> &sk) {
-    auto sk_p_coeff = CoeffPoly<PolyPT>::template FromSigned<int64_t>(sk);
+    auto sk_p_coeff = CoeffPoly<PolyPT>::FromSigned(std::span<const int64_t>(sk));
     EvalPoly<PolyQT> one_q;
     for (size_t i = 0; i < EvalPoly<PolyQT>::N; ++i) {
         one_q[i] = 1;

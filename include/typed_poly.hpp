@@ -57,7 +57,7 @@ public:
     PolyRep(PolyRep &&) noexcept = default;
     PolyRep &operator=(PolyRep &&) noexcept = default;
 
-    constexpr size_t size() const {
+    constexpr size_t size() const noexcept {
         return N;
     }
 
@@ -85,31 +85,50 @@ public:
         return a_[idx];
     }
 
+    void Fill(uint64_t x) noexcept {
+        std::fill_n(a_.get(), N, x % p);
+    }
+
+    void SetZero() noexcept {
+        Fill(0);
+    }
+
+    static PolyRep Zero() {
+        return PolyRep{};
+    }
+
     template <typename T>
     requires std::signed_integral<T> && std::same_as<DomainTag, CoeffTag>
-    static PolyRep FromSigned(const std::vector<T> &v) {
+    static PolyRep FromSigned(std::span<const T> v) {
         PolyRep ret;
-        constexpr int64_t mod = static_cast<int64_t>(p);
         const size_t bound = std::min(N, v.size());
         for (size_t i = 0; i < bound; ++i) {
-            int64_t residue = static_cast<int64_t>(v[i]) % mod;
-            if (residue < 0) {
-                residue += mod;
-            }
-            ret.a_[i] = static_cast<uint64_t>(residue);
+            ret.a_[i] = CanonicalizeSigned(v[i]);
         }
         return ret;
     }
 
     template <typename T>
     requires std::unsigned_integral<T> && std::same_as<DomainTag, CoeffTag>
-    static PolyRep FromUnsigned(const std::vector<T> &v) {
+    static PolyRep FromUnsigned(std::span<const T> v) {
         PolyRep ret;
         const size_t bound = std::min(N, v.size());
         for (size_t i = 0; i < bound; ++i) {
             ret.a_[i] = static_cast<uint64_t>(v[i]) % p;
         }
         return ret;
+    }
+
+    template <typename T>
+    requires std::signed_integral<T> && std::same_as<DomainTag, CoeffTag>
+    static PolyRep FromSigned(const std::vector<T> &v) {
+        return FromSigned<T>(std::span<const T>(v.data(), v.size()));
+    }
+
+    template <typename T>
+    requires std::unsigned_integral<T> && std::same_as<DomainTag, CoeffTag>
+    static PolyRep FromUnsigned(const std::vector<T> &v) {
+        return FromUnsigned<T>(std::span<const T>(v.data(), v.size()));
     }
 
     static PolyRep Monomial(size_t index, uint64_t value = 1)
@@ -122,27 +141,51 @@ public:
         return ret;
     }
 
-    PolyRep operator+(const PolyRep &rhs) const {
-        PolyRep ret;
+    PolyRep &operator+=(const PolyRep &rhs) noexcept {
         for (size_t i = 0; i < N; ++i) {
-            ret.a_[i] = Z::Add(a_[i], rhs.a_[i]);
+            a_[i] = Z::Add(a_[i], rhs.a_[i]);
         }
+        return *this;
+    }
+
+    PolyRep &operator-=(const PolyRep &rhs) noexcept {
+        for (size_t i = 0; i < N; ++i) {
+            a_[i] = Z::Sub(a_[i], rhs.a_[i]);
+        }
+        return *this;
+    }
+
+    PolyRep &operator*=(uint64_t rhs) noexcept {
+        for (size_t i = 0; i < N; ++i) {
+            a_[i] = Z::Mul(a_[i], rhs);
+        }
+        return *this;
+    }
+
+    PolyRep &operator*=(const PolyRep &rhs) noexcept
+    requires std::same_as<DomainTag, CanonicalEvalTag>
+    {
+        for (size_t i = 0; i < N; ++i) {
+            a_[i] = Z::Mul(a_[i], rhs.a_[i]);
+        }
+        return *this;
+    }
+
+    PolyRep operator+(const PolyRep &rhs) const {
+        PolyRep ret(*this);
+        ret += rhs;
         return ret;
     }
 
     PolyRep operator-(const PolyRep &rhs) const {
-        PolyRep ret;
-        for (size_t i = 0; i < N; ++i) {
-            ret.a_[i] = Z::Sub(a_[i], rhs.a_[i]);
-        }
+        PolyRep ret(*this);
+        ret -= rhs;
         return ret;
     }
 
     PolyRep operator*(uint64_t rhs) const {
-        PolyRep ret;
-        for (size_t i = 0; i < N; ++i) {
-            ret.a_[i] = Z::Mul(a_[i], rhs);
-        }
+        PolyRep ret(*this);
+        ret *= rhs;
         return ret;
     }
 
@@ -153,10 +196,8 @@ public:
     PolyRep operator*(const PolyRep &rhs) const
     requires std::same_as<DomainTag, CanonicalEvalTag>
     {
-        PolyRep ret;
-        for (size_t i = 0; i < N; ++i) {
-            ret.a_[i] = Z::Mul(a_[i], rhs.a_[i]);
-        }
+        PolyRep ret(*this);
+        ret *= rhs;
         return ret;
     }
 
@@ -170,6 +211,21 @@ public:
     }
 
 private:
+    template <typename T>
+    static uint64_t CanonicalizeSigned(T x) noexcept
+    requires std::signed_integral<T>
+    {
+        if (x >= 0) {
+            using UnsignedT = std::make_unsigned_t<T>;
+            return static_cast<uint64_t>(static_cast<__uint128_t>(static_cast<UnsignedT>(x)) % p);
+        }
+
+        using UnsignedT = std::make_unsigned_t<T>;
+        const UnsignedT ux = static_cast<UnsignedT>(x);
+        const __uint128_t mag = (static_cast<__uint128_t>(~ux) + 1) % p;
+        return mag == 0 ? 0 : p - static_cast<uint64_t>(mag);
+    }
+
     std::unique_ptr<uint64_t[]> a_;
 };
 

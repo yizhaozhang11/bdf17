@@ -1,5 +1,7 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -16,9 +18,15 @@ using EvalToy = EvalPoly<CircToy>;
 
 static_assert(requires(const CoeffToy &a, const CoeffToy &b) { a + b; });
 static_assert(requires(const CoeffToy &a, const CoeffToy &b) { a - b; });
+static_assert(requires(CoeffToy &a, const CoeffToy &b) { a += b; });
+static_assert(requires(CoeffToy &a, const CoeffToy &b) { a -= b; });
+static_assert(requires(CoeffToy &a) { a *= 7ULL; });
 static_assert(requires(const EvalToy &a, const EvalToy &b) { a * b; });
+static_assert(requires(EvalToy &a, const EvalToy &b) { a *= b; });
 static_assert(requires(const CoeffToy &a) { a * 7ULL; });
 static_assert(requires(const EvalToy &a) { 7ULL * a; });
+static_assert(requires { CoeffToy::FromUnsigned(std::span<const uint64_t>{}); });
+static_assert(requires { CoeffToy::FromSigned(std::span<const int64_t>{}); });
 
 uint64_t SignedMod(int64_t value, uint64_t mod) {
     const int64_t mod_i64 = static_cast<int64_t>(mod);
@@ -52,7 +60,7 @@ EvalToy ForwardToEval(const std::vector<uint64_t> &coeff) {
 } // namespace
 
 TEST(TypedPoly, CoeffConstructorsAndMonomial) {
-    const std::vector<int64_t> signed_input{
+    const std::array<int64_t, 8> signed_input{
         0,
         1,
         -1,
@@ -62,12 +70,12 @@ TEST(TypedPoly, CoeffConstructorsAndMonomial) {
         -2 * static_cast<int64_t>(CircToy::p),
         -2 * static_cast<int64_t>(CircToy::p) - 1,
     };
-    auto from_signed = CoeffToy::FromSigned(signed_input);
+    auto from_signed = CoeffToy::FromSigned(std::span<const int64_t>(signed_input));
     for (size_t i = 0; i < signed_input.size(); ++i) {
         EXPECT_EQ(from_signed[i], SignedMod(signed_input[i], CircToy::p));
     }
 
-    const std::vector<uint64_t> unsigned_input{
+    const std::array<uint64_t, 6> unsigned_input{
         0,
         1,
         CircToy::p - 1,
@@ -75,7 +83,7 @@ TEST(TypedPoly, CoeffConstructorsAndMonomial) {
         CircToy::p + 1,
         2 * CircToy::p + 5,
     };
-    auto from_unsigned = CoeffToy::FromUnsigned(unsigned_input);
+    auto from_unsigned = CoeffToy::FromUnsigned(std::span<const uint64_t>(unsigned_input));
     for (size_t i = 0; i < unsigned_input.size(); ++i) {
         EXPECT_EQ(from_unsigned[i], unsigned_input[i] % CircToy::p);
     }
@@ -88,8 +96,10 @@ TEST(TypedPoly, CoeffConstructorsAndMonomial) {
 }
 
 TEST(TypedPoly, CoeffArithmetic) {
-    auto a = CoeffToy::FromUnsigned(std::vector<uint64_t>{1, 2, 3, 4, 5, 6});
-    auto b = CoeffToy::FromUnsigned(std::vector<uint64_t>{10, 20, 30, 40, 50, 60});
+    const std::array<uint64_t, 6> a_input{1, 2, 3, 4, 5, 6};
+    const std::array<uint64_t, 6> b_input{10, 20, 30, 40, 50, 60};
+    auto a = CoeffToy::FromUnsigned(std::span<const uint64_t>(a_input));
+    auto b = CoeffToy::FromUnsigned(std::span<const uint64_t>(b_input));
 
     auto sum = a + b;
     auto back = sum - b;
@@ -100,6 +110,45 @@ TEST(TypedPoly, CoeffArithmetic) {
         const uint64_t expected = Zp<CircToy::p>::Mul(a[i], 11ULL);
         EXPECT_EQ(scaled[i], expected);
     }
+}
+
+TEST(TypedPoly, InPlaceOpsAndZeroHelpers) {
+    const std::array<uint64_t, 6> a_input{2, 4, 6, 8, 10, 12};
+    const std::array<uint64_t, 6> b_input{1, 3, 5, 7, 9, 11};
+    auto a = CoeffToy::FromUnsigned(std::span<const uint64_t>(a_input));
+    auto b = CoeffToy::FromUnsigned(std::span<const uint64_t>(b_input));
+
+    auto accum = a;
+    accum += b;
+    accum -= b;
+    EXPECT_EQ(accum, a);
+
+    auto scaled = a;
+    scaled *= 17ULL;
+    for (size_t i = 0; i < CircToy::N; ++i) {
+        EXPECT_EQ(scaled[i], Zp<CircToy::p>::Mul(a[i], 17ULL));
+    }
+
+    auto zero = CoeffToy::Zero();
+    for (size_t i = 0; i < CircToy::N; ++i) {
+        EXPECT_EQ(zero[i], 0ULL);
+    }
+
+    zero.Fill(CircToy::p + 9);
+    for (size_t i = 0; i < CircToy::N; ++i) {
+        EXPECT_EQ(zero[i], 9ULL);
+    }
+    zero.SetZero();
+    for (size_t i = 0; i < CircToy::N; ++i) {
+        EXPECT_EQ(zero[i], 0ULL);
+    }
+
+    auto lhs_eval = ForwardToEval(std::vector<uint64_t>{1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25});
+    auto rhs_eval = ForwardToEval(std::vector<uint64_t>{2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26});
+    auto expected_eval = lhs_eval * rhs_eval;
+
+    lhs_eval *= rhs_eval;
+    EXPECT_EQ(lhs_eval, expected_eval);
 }
 
 TEST(TypedPoly, EvalPointwiseMultiplyMatchesCircularConvolution) {
