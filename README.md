@@ -301,7 +301,21 @@ BDF17_ENABLE_EXTENDED_NTT_TESTS=1 ctest --test-dir build --output-on-failure -R 
 ./build/bdf17_benchmarks
 ```
 
-The current benchmark target focuses on NTT-plan microbenchmarks rather than full bootstrap timings.
+The benchmark target now includes:
+
+- NTT-plan microbenchmarks,
+- stage-level pipeline benchmarks (`accum_p`, `accum_q`, `expcrt`, `fun_extract`),
+- end-to-end bootstrap trial benchmarks in:
+  - `setup=warm` mode (setup reused across iterations),
+  - `setup=cold` mode (setup included in each iteration).
+
+Each pipeline benchmark emits metadata/counters for profile, seed, backend, LUT kind, ring sizes, stage timings, and approximate key bytes.
+
+Script-friendly export is available via Google Benchmark JSON output:
+
+```bash
+./build/bdf17_benchmarks --benchmark_filter=BM_Bootstrap --benchmark_format=json
+```
 
 ---
 
